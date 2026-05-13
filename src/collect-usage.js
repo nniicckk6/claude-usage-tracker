@@ -354,6 +354,11 @@ function parseOpenClawFormat(filePath) {
     if (!usage) continue;
     if (!usage.cost && !usage.input && !usage.output) continue;
 
+    const model = (msg && msg.model) || entry.model || '';
+    // Only count entries that used a Claude model — OpenClaw also routes to
+    // non-Claude providers (free, gateway-injected, delivery-mirror, etc.)
+    if (!model || !model.startsWith('claude')) continue;
+
     let tsMs = parseTimestamp(entry.timestamp) || parseTimestamp(msg && msg.timestamp);
     let date = tsMs ? toLocalDate(tsMs) : fallbackDate;
     let time = tsMs ? toLocalTime(tsMs) : '00:00';
@@ -363,8 +368,7 @@ function parseOpenClawFormat(filePath) {
     const dd = dayData[date];
     if (time) dd.times.push(time);
 
-    const model = (msg && msg.model) || entry.model || '';
-    if (model && model.startsWith('claude')) dd.models.add(model);
+    dd.models.add(model);
 
     if (usage.cost && usage.cost.total) {
       dd.cost += usage.cost.total;
