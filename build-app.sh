@@ -5,40 +5,79 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC_DIR="$SCRIPT_DIR/src"
+PREMIUM_DIR="$SCRIPT_DIR/src-premium"
+ASSETS_DIR="$SCRIPT_DIR/assets"
+DIST_DIR="$SCRIPT_DIR/dist"
 APP_NAME="Claude Usage Dashboard"
-APP_DIR="$SCRIPT_DIR/$APP_NAME.app"
+VERSION_FILE="$SCRIPT_DIR/VERSION"
+if [ -n "${APP_VERSION:-}" ]; then
+    APP_VERSION="$APP_VERSION"
+elif [ -f "$VERSION_FILE" ]; then
+    APP_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
+else
+    echo "❌ VERSION file not found and APP_VERSION is not set"
+    exit 1
+fi
+if [[ ! "$APP_VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}([.-][A-Za-z0-9]+)?$ ]]; then
+    echo "❌ Invalid app version: $APP_VERSION"
+    exit 1
+fi
+APP_DIR="$DIST_DIR/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 
+# PAID_BUILD=1 includes src-premium/*.swift (gitignored, maintainer-only).
+PREMIUM_FILES=()
+SWIFT_DEFINES=()
+if [ "${PAID_BUILD:-}" = "1" ]; then
+    if [ -d "$PREMIUM_DIR" ]; then
+        while IFS= read -r f; do PREMIUM_FILES+=("$f"); done \
+            < <(find "$PREMIUM_DIR" -name '*.swift')
+        SWIFT_DEFINES=(-D PAID_BUILD)
+        echo "🔒 Paid build: including ${#PREMIUM_FILES[@]} file(s) from src-premium/"
+    else
+        echo "⚠️  PAID_BUILD=1 but $PREMIUM_DIR not found — falling back to OSS build"
+    fi
+fi
+
 echo "🔨 Building $APP_NAME.app ..."
+echo "🏷️  Version: $APP_VERSION"
 
 # Clean previous build
 rm -rf "$APP_DIR"
 
-# Create .app bundle structure
+# Create .app bundle structure (and dist/)
 mkdir -p "$MACOS" "$RESOURCES/data"
 
-# ─── Compile native Swift app ─────────────────────────────
-echo "⚙️  Compiling native app ..."
-swiftc -O \
-    -o "$MACOS/ClaudeUsageDashboard" \
-    "$SCRIPT_DIR/App.swift" \
-    -framework Cocoa \
-    -framework WebKit \
-    -target "${BUILD_ARCH:-$(uname -m)}-apple-macos12.0"
-echo "  ✅ Binary compiled"
+# ─── Compile native Swift app (universal binary) ──────────
+echo "⚙️  Compiling universal binary (arm64 + x86_64) ..."
+TMP_BIN_ARM="$(mktemp -t ClaudeUsageDashboard.arm64.XXXX)"
+TMP_BIN_X86="$(mktemp -t ClaudeUsageDashboard.x86_64.XXXX)"
+trap 'rm -f "$TMP_BIN_ARM" "$TMP_BIN_X86"' EXIT
+
+swiftc -O -parse-as-library "${SWIFT_DEFINES[@]}" -o "$TMP_BIN_ARM" \
+    "$SRC_DIR/App.swift" "${PREMIUM_FILES[@]}" \
+    -framework Cocoa -framework WebKit \
+    -target arm64-apple-macos12.0
+swiftc -O -parse-as-library "${SWIFT_DEFINES[@]}" -o "$TMP_BIN_X86" \
+    "$SRC_DIR/App.swift" "${PREMIUM_FILES[@]}" \
+    -framework Cocoa -framework WebKit \
+    -target x86_64-apple-macos12.0
+lipo -create -output "$MACOS/ClaudeUsageDashboard" "$TMP_BIN_ARM" "$TMP_BIN_X86"
+echo "  ✅ Universal binary built: $(lipo -archs "$MACOS/ClaudeUsageDashboard")"
 
 # Copy the core files into Resources
-cp "$SCRIPT_DIR/collect-usage.js" "$RESOURCES/"
-cp "$SCRIPT_DIR/dashboard.html" "$RESOURCES/"
+cp "$SRC_DIR/collect-usage.js" "$RESOURCES/"
+cp "$SRC_DIR/dashboard.html" "$RESOURCES/"
 
 # Copy the modular CSS and JS directories
-cp -r "$SCRIPT_DIR/css" "$RESOURCES/"
-cp -r "$SCRIPT_DIR/js" "$RESOURCES/"
+cp -r "$SRC_DIR/css" "$RESOURCES/"
+cp -r "$SRC_DIR/js" "$RESOURCES/"
 
 # Create Info.plist
-cat > "$CONTENTS/Info.plist" << 'PLIST'
+cat > "$CONTENTS/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -52,9 +91,9 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
     <key>CFBundleIdentifier</key>
     <string>com.openclaw.usage-dashboard</string>
     <key>CFBundleVersion</key>
-    <string>2.2.2</string>
+    <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
-    <string>2.2.2</string>
+    <string>$APP_VERSION</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -68,7 +107,7 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 PLIST
 
 # ─── Generate app icon from logo.svg ─────────────────────
-SVG="$SCRIPT_DIR/logo.svg"
+SVG="$ASSETS_DIR/logo.svg"
 if [ -f "$SVG" ]; then
     echo "🎨 Generating app icon from logo.svg ..."
     ICONSET="$RESOURCES/AppIcon.iconset"
@@ -120,6 +159,43 @@ SWIFT
     rm -rf "$ICONSET"
 else
     echo "  ⚠️  logo.svg not found — app will use default icon"
+fi
+
+# ─── Sign, notarize, staple (optional) ────────────────────
+# Set these env vars to enable distribution-ready output:
+#   SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+#   NOTARY_PROFILE="AC_NOTARY"    # name used with `notarytool store-credentials`
+# Without them, the .app is left unsigned (fine for local use).
+if [ -n "$SIGN_IDENTITY" ]; then
+    echo ""
+    echo "🔏 Signing with: $SIGN_IDENTITY"
+    codesign --force --options runtime --timestamp \
+        --sign "$SIGN_IDENTITY" \
+        "$APP_DIR"
+    codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+    echo "  ✅ Signed"
+
+    if [ -n "$NOTARY_PROFILE" ]; then
+        ZIP_PATH="$DIST_DIR/ClaudeUsageDashboard.zip"
+        echo ""
+        echo "📤 Submitting for notarization (profile: $NOTARY_PROFILE) ..."
+        ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
+        xcrun notarytool submit "$ZIP_PATH" \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --wait
+        echo "  ✅ Notarized"
+
+        echo "📎 Stapling ticket ..."
+        xcrun stapler staple "$APP_DIR"
+        xcrun stapler validate "$APP_DIR"
+
+        # Re-zip the now-stapled app for distribution
+        rm -f "$ZIP_PATH"
+        ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
+        echo "  ✅ Distribution zip: $ZIP_PATH"
+    else
+        echo "  ℹ️  NOTARY_PROFILE not set — skipping notarization"
+    fi
 fi
 
 # ─── Done ─────────────────────────────────────────────────

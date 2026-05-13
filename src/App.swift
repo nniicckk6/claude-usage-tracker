@@ -85,7 +85,15 @@ class SessionDetailBridge: NSObject, WKScriptMessageHandlerWithReply {
     }
 }
 
+@main
 class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+
     var window: NSWindow!
     var webView: WKWebView!
     var dashboardNavigation: WKNavigation?
@@ -97,8 +105,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         setupMainMenu()
         setupWindow()
         showLoadingScreen()
+        #if PAID_BUILD
+        PremiumGate.runLaunchGate(parent: window) { [weak self] in
+            self?.collectDataAndLoadDashboard()
+            self?.checkForPremiumUpdatesInBackground()
+        }
+        #else
         collectDataAndLoadDashboard()
+        #endif
     }
+
+    #if PAID_BUILD
+    @objc func showLicenseManager() {
+        PremiumGate.showManagement(parent: window)
+    }
+
+    @objc func checkForUpdates() {
+        PremiumUpdateChecker.shared.check(parent: window, userInitiated: true)
+    }
+
+    private func checkForPremiumUpdatesInBackground() {
+        PremiumUpdateChecker.shared.check(parent: window, userInitiated: false)
+    }
+    #endif
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
@@ -131,6 +160,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         appMenu.addItem(withTitle: "Show All",
                         action: #selector(NSApplication.unhideAllApplications(_:)),
                         keyEquivalent: "")
+        #if PAID_BUILD
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Manage License…",
+                        action: #selector(showLicenseManager),
+                        keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…",
+                        action: #selector(checkForUpdates),
+                        keyEquivalent: "")
+        #endif
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Claude Usage Dashboard",
                         action: #selector(NSApplication.terminate(_:)),
@@ -840,10 +878,3 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         """
     }
 }
-
-// MARK: - Entry Point
-
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
