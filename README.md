@@ -1,8 +1,8 @@
 <div align="center">
 
-# 🧾 Claude Usage Tracker
+# 🧾 AI Usage Tracker
 
-### Track and visualize Claude AI usage costs across all your local development tools
+### Track and visualize Claude + Codex usage costs across all your local development tools
 
 <p>
   <img src="https://img.shields.io/badge/license-MIT-3b82f6?style=flat-square" alt="License" />
@@ -24,7 +24,7 @@
 
 <br />
 
-<img src="assets/screenshots/demo1.png" alt="Claude Usage Tracker Dashboard" width="900" />
+<img src="assets/screenshots/demo1.png" alt="AI Usage Tracker Dashboard" width="900" />
 
 <br /><br />
 
@@ -34,7 +34,7 @@
 
 ## ✨ Overview
 
-**Claude Usage Tracker** is a local-first tool that automatically discovers and aggregates your Claude AI usage across **9+ development tools**. It scans known data directories, parses JSONL/log files, calculates costs using model-specific pricing, and presents everything in a beautiful **dark-themed interactive dashboard** powered by Chart.js.
+**AI Usage Tracker** (formerly Claude Usage Tracker) is a local-first tool that automatically discovers and aggregates your AI coding usage across **10+ development tools** — covering both **Anthropic Claude** and **OpenAI Codex**. It scans known data directories, parses JSONL/log files, calculates costs using model-specific pricing, and presents everything in a beautiful **dark-themed interactive dashboard** powered by Chart.js. A top-level **All / Claude / Codex** pill toggle scopes the entire dashboard to a single provider.
 
 > [!TIP]
 > **No cloud. No telemetry. No accounts.** Everything stays on your machine — your data never leaves your laptop.
@@ -51,7 +51,7 @@ This project is open source under the MIT license. You can build and use it your
 
 ### 🎯 Built for developers
 
-- **Auto-discovery** — detects all your Claude tools
+- **Auto-discovery** — detects Claude + Codex tools
 - **Privacy-first** — 100% local, zero telemetry
 - **Beautiful UI** — dark mode dashboard with charts
 - **Zero config** — just run and open
@@ -61,7 +61,7 @@ This project is open source under the MIT license. You can build and use it your
 
 ### 📦 Works with
 
-`OpenClaw` · `Clawdbot` · `Claude Code CLI` · `Claude Desktop` · `Cursor` · `Windsurf` · `Cline` · `Roo Code` · `Aider` · `Continue.dev`
+`OpenClaw` · `Clawdbot` · `Claude Code CLI` · `Claude Desktop` · `Cursor` · `Windsurf` · `Cline` · `Roo Code` · `Aider` · `Continue.dev` · `Codex CLI` · `Codex Exec` · `Codex Review`
 
 </td>
 </tr>
@@ -77,7 +77,7 @@ This project is open source under the MIT license. You can build and use it your
   <img src="assets/screenshots/demo1.png" alt="Dashboard Overview" width="900" />
 </p>
 
-> Top-line stats (Today / Week / Month / All-time / Sessions), daily spend chart with source breakdown, and donut charts for cost-by-source and cost-by-model.
+> Top-line stats (Today / Week / Month / All-time / Sessions), provider pill toggle (All / Claude / Codex), daily spend chart with source breakdown, and donut charts for cost-by-source and cost-by-model.
 
 <br />
 
@@ -97,7 +97,7 @@ This project is open source under the MIT license. You can build and use it your
   <img src="assets/screenshots/demo3.png" alt="Session Log Timeline" width="900" />
 </p>
 
-> Day-by-day session timeline with expandable rows. Color-coded model chips, full token breakdown (input / output / cache read / cache write), and per-day totals.
+> Day-by-day session timeline with expandable rows. Color-coded model chips (Claude + GPT/Codex), full token breakdown (input / output / cache read / cache write), and per-day totals.
 
 <br />
 
@@ -117,7 +117,7 @@ This project is open source under the MIT license. You can build and use it your
   <img src="assets/screenshots/demo5.png" alt="Session Detail Panel" width="420" />
 </p>
 
-> Drill into any session: token breakdown, conversation preview, and a one-click resume command for Claude Code.
+> Drill into any session: token breakdown (including Codex reasoning tokens), conversation preview, and a one-click resume command (`claude --resume <id>` for Claude Code, `codex resume <id>` for Codex).
 
 ---
 
@@ -128,17 +128,17 @@ This project is open source under the MIT license. You can build and use it your
 <td width="33%" valign="top">
 
 #### 🔍 Discovery
-- Multi-source auto-detection
-- 9+ supported tools
+- Claude + Codex auto-detection
+- 10+ supported tools
 - Silent fallback for missing tools
-- Smart deduplication
+- Smart provider-aware deduplication
 
 </td>
 <td width="33%" valign="top">
 
 #### 📊 Analytics
 - Daily / weekly / monthly / all-time
-- Per-model cost breakdown
+- Per-provider, per-model, per-source breakdown
 - Per-project cost rollup
 - Monthly cost projections
 - Yesterday delta comparison
@@ -160,16 +160,17 @@ This project is open source under the MIT license. You can build and use it your
 
 #### 🧮 Cost intelligence
 - Per-million-token pricing
-- All Opus / Sonnet / Haiku tiers
-- Cache read / write tracking
+- Opus / Sonnet / Haiku tiers (Anthropic USD)
+- GPT-5.x / Codex tiers (OpenAI API USD)
+- Cache read / write + reasoning tokens
 - Most-expensive-session callout
 
 </td>
 <td valign="top">
 
 #### 🔎 Filtering & search
-- Multi-criteria filters
-- Visual filter chips
+- Provider pill (All / Claude / Codex)
+- Multi-criteria filters with chips
 - Source / model / date range
 - Minimum cost threshold
 
@@ -180,7 +181,7 @@ This project is open source under the MIT license. You can build and use it your
 - Standalone `.app` bundle
 - Premium build with automatic update checks
 - Keyboard shortcuts (`Shift+E`)
-- One-click session resume
+- One-click session resume (Claude + Codex)
 - Browser-mode fallback
 
 </td>
@@ -203,7 +204,7 @@ The source code is free, but the premium build is the easiest way to use the app
   <a href="https://buy.polar.sh/polar_cl_1ljeQzFXHTipMnCtDF7Od6hFug67DBci8CToc083Wxj"><strong>Buy Premium Build →</strong></a>
 </p>
 
-After purchase, download the `.dmg`, open it, drag **Claude Usage Tracker** to **Applications**, and launch.
+After purchase, download the `.dmg`, open it, drag **AI Usage Tracker** to **Applications**, and launch.
 
 <br />
 
@@ -215,7 +216,7 @@ cd claude-usage-tracker
 ./build-app.sh
 ```
 
-Then double-click **Claude Usage Tracker.app** — it collects fresh data and renders everything in a native window.
+Then double-click **AI Usage Tracker.app** — it collects fresh data and renders everything in a native window.
 
 The source build is open source and does not include the premium license gate or premium update checker.
 
@@ -230,6 +231,9 @@ python3 -m http.server 8765
 open http://localhost:8765/dashboard.html
 ```
 
+> [!NOTE]
+> Upgrading from 2.x? Your data carries over automatically — the app migrates `~/Library/Application Support/ClaudeUsageTracker` → `AIUsageTracker` on first launch.
+
 ---
 
 ## 📦 Supported Tools
@@ -237,63 +241,69 @@ open http://localhost:8765/dashboard.html
 <table>
 <tr>
 <th>Tool</th>
-<th>Description</th>
+<th>Provider</th>
 <th>Data Location</th>
 <th>Format</th>
 </tr>
 <tr>
 <td><strong>OpenClaw</strong> / Clawdbot</td>
-<td>AI agent framework</td>
+<td>Claude</td>
 <td><code>~/.openclaw/agents/main/sessions/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Claude Code CLI</strong></td>
-<td>Anthropic's official CLI</td>
+<td>Claude</td>
 <td><code>~/.claude/projects/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Claude Desktop</strong></td>
-<td>Local agent mode sessions</td>
+<td>Claude</td>
 <td><code>~/Library/Application Support/Claude/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Cursor</strong></td>
-<td>AI-powered code editor</td>
+<td>Claude</td>
 <td><code>~/.cursor/projects/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Windsurf</strong></td>
-<td>Codeium's AI IDE</td>
+<td>Claude</td>
 <td><code>~/.windsurf/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Cline</strong></td>
-<td>VS Code Claude extension</td>
+<td>Claude</td>
 <td><code>~/.cline/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Roo Code</strong></td>
-<td>VS Code AI assistant</td>
+<td>Claude</td>
 <td><code>~/.roo-code/</code></td>
 <td>JSONL</td>
 </tr>
 <tr>
 <td><strong>Aider</strong></td>
-<td>AI pair programming</td>
+<td>Claude</td>
 <td><code>~/.aider/</code></td>
 <td>JSONL (litellm)</td>
 </tr>
 <tr>
 <td><strong>Continue.dev</strong></td>
-<td>Open-source AI assistant</td>
+<td>Claude</td>
 <td><code>~/.continue/sessions/</code></td>
 <td>JSON</td>
+</tr>
+<tr>
+<td><strong>Codex CLI</strong> / Exec / Review</td>
+<td>Codex</td>
+<td><code>~/.codex/sessions/</code></td>
+<td>JSONL (rollout-*)</td>
 </tr>
 </table>
 
@@ -304,7 +314,9 @@ open http://localhost:8765/dashboard.html
 
 ## 💰 Pricing Models
 
-Costs are calculated using Anthropic's per-million-token pricing. The tracker supports all current and upcoming model families.
+Costs are calculated using each provider's per-million-token pricing — Anthropic's published USD for Claude, OpenAI API standard USD for Codex. Totals stay comparable in a single dollar figure regardless of which provider you're viewing.
+
+### Anthropic Claude
 
 <table>
 <tr>
@@ -358,7 +370,48 @@ Costs are calculated using Anthropic's per-million-token pricing. The tracker su
 </tr>
 </table>
 
-<sub>All prices in USD per million tokens.</sub>
+### OpenAI Codex
+
+<table>
+<tr>
+<th align="left">Model</th>
+<th align="right">Input</th>
+<th align="right">Output</th>
+<th align="right">Cache Read</th>
+</tr>
+<tr>
+<td>🟢 <strong>GPT-5.5</strong></td>
+<td align="right">$5.00</td>
+<td align="right">$30.00</td>
+<td align="right">$0.50</td>
+</tr>
+<tr>
+<td>🟢 <strong>GPT-5.4</strong></td>
+<td align="right">$2.50</td>
+<td align="right">$15.00</td>
+<td align="right">$0.25</td>
+</tr>
+<tr>
+<td>🟢 <strong>GPT-5.4 Mini</strong></td>
+<td align="right">$0.75</td>
+<td align="right">$4.50</td>
+<td align="right">$0.075</td>
+</tr>
+<tr>
+<td>🟢 <strong>GPT-5.3 Codex</strong></td>
+<td align="right">$1.75</td>
+<td align="right">$14.00</td>
+<td align="right">$0.175</td>
+</tr>
+<tr>
+<td>🟢 <strong>GPT-5.2</strong></td>
+<td align="right">$2.00</td>
+<td align="right">$10.00</td>
+<td align="right">$0.20</td>
+</tr>
+</table>
+
+<sub>All prices in USD per million tokens. OpenAI bills reasoning tokens as part of <code>output_tokens</code>, so they aren't double-counted — the dashboard shows reasoning separately in the session detail modal for visibility only.</sub>
 
 ---
 
@@ -378,7 +431,7 @@ Please follow the existing code style and commit message conventions (`feat:`, `
 
 #### 💡 Ideas for contributions
 
-- 🔌 Add support for additional AI tools
+- 🔌 Add support for additional AI tools (Gemini CLI, Copilot CLI, etc.)
 - 📱 Improve mobile responsiveness
 - 📤 Add data export (CSV, JSON)
 - 🔔 Add cost alerts / budget thresholds
@@ -395,7 +448,7 @@ This project is licensed under the [**MIT License**](LICENSE).
 
 <div align="center">
 
-### Built with ❤️ for the Claude community
+### Built with ❤️ for the AI developer community
 
 <br />
 
