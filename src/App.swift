@@ -99,10 +99,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     var dashboardNavigation: WKNavigation?
     let sessionDetailBridge = SessionDetailBridge()
 
-    /// Runtime/user-generated files live outside the .app bundle so they
-    /// survive every upgrade path (DMG drag-replace, build-app.sh rebuild,
-    /// in-app premium updater). Writing inside the bundle would also
-    /// invalidate its code signature.
+    /// Writing inside the .app bundle invalidates its code signature and
+    /// loses data on every upgrade (DMG replace, rebuild, in-app updater).
     private static let userDataDir: String = {
         let home = NSHomeDirectory()
         let dir = "\(home)/Library/Application Support/ClaudeUsageTracker"
@@ -422,7 +420,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         process.arguments = [resourcesPath + "/collect-usage.js"]
         process.currentDirectoryURL = URL(fileURLWithPath: resourcesPath)
 
-        // Ensure child process has a usable PATH and knows where to write data
+        // GUI launchd hands us a near-empty PATH; widen it before spawning node.
         var env = ProcessInfo.processInfo.environment
         let extra = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         env["PATH"] = extra + ":" + (env["PATH"] ?? "")
@@ -446,24 +444,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     }
 
     func findNode() -> String? {
-        let candidates = [
+        // GUI launchd's minimal PATH hides node managed by nvm/fnm/volta/asdf,
+        // so check their install paths directly before falling back to a login
+        // shell (which sources the user's .zprofile / .bash_profile for PATH).
+        let home = NSHomeDirectory()
+        var candidates = [
             "/opt/homebrew/bin/node",
             "/usr/local/bin/node",
-            "/usr/bin/node"
+            "\(home)/.volta/bin/node",
+            "\(home)/.fnm/aliases/default/bin/node",
+            "\(home)/.local/share/fnm/aliases/default/bin/node",
+            "\(home)/.asdf/shims/node",
+            "\(home)/.local/bin/node",
+            "/usr/bin/node",
         ]
+
+        // nvm: ~/.nvm/versions/node/v*/bin/node — descending name sort picks
+        // the newest version since entries are prefixed `vX.Y.Z`.
+        let nvmRoot = "\(home)/.nvm/versions/node"
+        if let entries = try? FileManager.default.contentsOfDirectory(atPath: nvmRoot) {
+            for v in entries.sorted(by: >) {
+                candidates.append("\(nvmRoot)/\(v)/bin/node")
+            }
+        }
+
         for path in candidates {
             if FileManager.default.isExecutableFile(atPath: path) { return path }
         }
 
-        // Fallback: which node
-        let which = Process()
-        which.executableURL = URL(fileURLWithPath: "/usr/bin/which")
-        which.arguments = ["node"]
+        let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: shell)
+        proc.arguments = ["-l", "-c", "command -v node"]
         let pipe = Pipe()
-        which.standardOutput = pipe
-        which.standardError = FileHandle.nullDevice
-        try? which.run()
-        which.waitUntilExit()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+        proc.waitUntilExit()
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         if let path = String(data: data, encoding: .utf8)?
@@ -481,12 +498,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         let dashboardURL = URL(fileURLWithPath: resourcesPath + "/dashboard.html")
         let resourcesDir = URL(fileURLWithPath: resourcesPath, isDirectory: true)
 
-        // data.js lives outside the bundle in userDataDir, but the WebView is
-        // sandboxed to Resources. Inject the collector's output as a user
-        // script at document start so the dashboard sees the globals before
-        // any other script runs. removeAllUserScripts() clears the previous
-        // injection on reload but leaves WKScriptMessageHandler bindings
-        // (reload/export/import/saveImportedData) intact.
+        // data.js lives outside the WebView's sandboxed read-access root, so
+        // we inject it as a user script instead of loading it via <script src>.
+        // removeAllUserScripts() resets the injection on reload without
+        // touching WKScriptMessageHandler registrations.
         let controller = webView.configuration.userContentController
         controller.removeAllUserScripts()
         let dataJs = (try? String(contentsOfFile: AppDelegate.userDataDir + "/data.js", encoding: .utf8)) ?? ""
