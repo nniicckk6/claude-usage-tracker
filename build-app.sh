@@ -89,7 +89,7 @@ cat > "$CONTENTS/Info.plist" << PLIST
     <key>CFBundleDisplayName</key>
     <string>AI Usage Tracker</string>
     <key>CFBundleIdentifier</key>
-    <string>com.aiusagetracker</string>
+    <string>com.claudeusagetracker</string>
     <key>CFBundleVersion</key>
     <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
