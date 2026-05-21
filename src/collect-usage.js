@@ -21,10 +21,8 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-// When the Swift launcher invokes us, it sets CLAUDE_USAGE_DATA_DIR to
-// ~/Library/Application Support/ClaudeUsageTracker so user data lives outside
-// the .app bundle and survives upgrades. Standalone CLI runs fall back to
-// src/data/ next to this script.
+// CLAUDE_USAGE_DATA_DIR lets the macOS app redirect output outside the
+// .app bundle; standalone CLI runs default to src/data/.
 const OUTPUT_DIR = process.env.CLAUDE_USAGE_DATA_DIR || path.join(__dirname, 'data');
 if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 const CACHE_FILE = path.join(OUTPUT_DIR, 'sessions-cache.json');
