@@ -49,9 +49,6 @@ echo "🏷️  Version: $APP_VERSION"
 rm -rf "$APP_DIR"
 
 # Create .app bundle structure (and dist/)
-# Runtime data (sessions-cache.json, scan-index.json, data.js, launcher.log)
-# is written to ~/Library/Application Support/ClaudeUsageTracker, not into
-# the bundle — so there's no Resources/data subdir to create here.
 mkdir -p "$MACOS" "$RESOURCES"
 
 # ─── Compile native Swift app (universal binary) ──────────
@@ -247,6 +244,25 @@ if [ "${SKIP_DMG:-}" != "1" ]; then
         if [ -n "$SIGN_IDENTITY" ]; then
             codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG_PATH" >/dev/null 2>&1 \
                 && echo "  🔏 DMG signed"
+
+            # Notarize + staple the DMG itself. The .app inside was notarized
+            # earlier as part of the .zip submission, but the DMG container is
+            # a separate artifact with its own hash — Apple needs a ticket for
+            # it, otherwise downloaded copies trigger an online Gatekeeper check
+            # and a "cannot verify" prompt when the user opens the DMG.
+            if [ -n "$NOTARY_PROFILE" ]; then
+                echo "  📤 Submitting DMG for notarization (profile: $NOTARY_PROFILE) ..."
+                if xcrun notarytool submit "$DMG_PATH" \
+                        --keychain-profile "$NOTARY_PROFILE" \
+                        --wait; then
+                    echo "  📎 Stapling DMG ticket ..."
+                    xcrun stapler staple "$DMG_PATH" \
+                        && xcrun stapler validate "$DMG_PATH" \
+                        && echo "  ✅ DMG notarized and stapled"
+                else
+                    echo "  ⚠️  DMG notarization failed — shipping unstapled"
+                fi
+            fi
         fi
         echo "  ✅ DMG: $DMG_PATH"
     else
