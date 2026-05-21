@@ -1,4 +1,4 @@
-// App.swift — Native macOS app for Claude Usage Tracker
+// App.swift — Native macOS app for AI Usage Tracker
 // Renders the dashboard in a WKWebView instead of opening a browser.
 
 import Cocoa
@@ -22,6 +22,7 @@ class SessionDetailBridge: NSObject, WKScriptMessageHandlerWithReply {
             "/.roo-code",
             "/.aider",
             "/.continue",
+            "/.codex/sessions",
             "/Library/Application Support/Claude/local-agent-mode-sessions",
             "/Library/Application Support/Cursor",
             "/Library/Application Support/Windsurf",
@@ -103,10 +104,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     /// loses data on every upgrade (DMG replace, rebuild, in-app updater).
     private static let userDataDir: String = {
         let home = NSHomeDirectory()
-        let dir = "\(home)/Library/Application Support/ClaudeUsageTracker"
-        try? FileManager.default.createDirectory(
-            atPath: dir, withIntermediateDirectories: true
-        )
+        let dir = "\(home)/Library/Application Support/AIUsageTracker"
+        let legacyDir = "\(home)/Library/Application Support/ClaudeUsageTracker"
+        let fm = FileManager.default
+        // One-time migration from the pre-rename data directory.
+        if !fm.fileExists(atPath: dir) && fm.fileExists(atPath: legacyDir) {
+            try? fm.moveItem(atPath: legacyDir, toPath: dir)
+        }
+        try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
         return dir
     }()
 
@@ -153,15 +158,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     func setupMainMenu() {
         let mainMenu = NSMenu()
 
-        // App menu
         let appMenuItem = NSMenuItem()
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About Claude Usage Tracker",
+        appMenu.addItem(withTitle: "About AI Usage Tracker",
                         action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
                         keyEquivalent: "")
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Hide Claude Usage Tracker",
+        appMenu.addItem(withTitle: "Hide AI Usage Tracker",
                         action: #selector(NSApplication.hide(_:)),
                         keyEquivalent: "h")
         let hideOthers = appMenu.addItem(withTitle: "Hide Others",
@@ -181,7 +185,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                         keyEquivalent: "")
         #endif
         appMenu.addItem(.separator())
-        appMenu.addItem(withTitle: "Quit Claude Usage Tracker",
+        appMenu.addItem(withTitle: "Quit AI Usage Tracker",
                         action: #selector(NSApplication.terminate(_:)),
                         keyEquivalent: "q")
         appMenuItem.submenu = appMenu
@@ -199,7 +203,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenuItem.submenu = editMenu
 
-        // View menu
         let viewMenuItem = NSMenuItem()
         mainMenu.addItem(viewMenuItem)
         let viewMenu = NSMenu(title: "View")
@@ -208,7 +211,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                          keyEquivalent: "r")
         viewMenuItem.submenu = viewMenu
 
-        // Window menu
         let windowMenuItem = NSMenuItem()
         mainMenu.addItem(windowMenuItem)
         let windowMenu = NSMenu(title: "Window")
@@ -246,7 +248,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             backing: .buffered,
             defer: false
         )
-        window.title = "Claude Usage Tracker"
+        window.title = "AI Usage Tracker"
         window.appearance = NSAppearance(named: .darkAqua)
         window.backgroundColor = NSColor(red: 0.039, green: 0.055, blue: 0.09, alpha: 1.0)
         window.titlebarAppearsTransparent = true
@@ -261,15 +263,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         config.preferences = prefs
         config.setValue(true, forKey: "allowUniversalAccessFromFileURLs")
 
-        // Register message handlers
         let contentController = WKUserContentController()
         contentController.add(self, name: "reload")
         contentController.add(self, name: "exportData")
         contentController.add(self, name: "importData")
         contentController.add(self, name: "saveImportedData")
-        // Reply-style handler used by the session detail modal to lazy-load
-        // a single JSONL file off disk. Registered on a dedicated bridge
-        // object so AppDelegate stays a pure WKScriptMessageHandler.
+        // Reply-style handler — kept on a dedicated bridge so AppDelegate
+        // can stay a pure WKScriptMessageHandler.
         contentController.addScriptMessageHandler(sessionDetailBridge, contentWorld: .page, name: "loadSessionDetail")
         config.userContentController = contentController
 
@@ -310,7 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
     func handleExport(_ jsonString: String) {
         let panel = NSSavePanel()
         let dateStr = ISO8601DateFormatter().string(from: Date()).prefix(10)
-        panel.nameFieldStringValue = "claude-usage-\(dateStr).json"
+        panel.nameFieldStringValue = "ai-usage-\(dateStr).json"
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
         panel.title = "Export Usage Data"
@@ -336,7 +336,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.title = "Import Usage Data"
-        panel.message = "Select a claude-usage JSON file exported from another device"
+        panel.message = "Select an ai-usage JSON file exported from another device"
 
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url else {
@@ -345,7 +345,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             }
             do {
                 let jsonString = try String(contentsOf: url, encoding: .utf8)
-                // Escape for JS string literal
                 let escaped = jsonString
                     .replacingOccurrences(of: "\\", with: "\\\\")
                     .replacingOccurrences(of: "'", with: "\\'")
@@ -407,7 +406,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
             DispatchQueue.main.async {
                 let alert = NSAlert()
                 alert.messageText = "Node.js not found"
-                alert.informativeText = "Claude Usage Tracker requires Node.js to collect data.\nInstall it from https://nodejs.org"
+                alert.informativeText = "AI Usage Tracker requires Node.js to collect data.\nInstall it from https://nodejs.org"
                 alert.alertStyle = .critical
                 alert.runModal()
                 NSApp.terminate(nil)
@@ -890,7 +889,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScri
                 </svg>
             </div>
 
-            <div class="title"><em>Claude</em> Usage Tracker</div>
+            <div class="title"><em>AI</em> Usage Tracker</div>
 
             <div class="progress">
                 <div class="progress-track"><div class="progress-fill"></div></div>

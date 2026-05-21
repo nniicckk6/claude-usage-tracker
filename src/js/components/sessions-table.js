@@ -1,17 +1,9 @@
-/**
- * sessions-table.js
- *
- * Session table rendering with day/week grouping, expandable details,
- * and keyboard shortcuts for toggling.
- */
-
 import { formatNumber } from '../utils/formatters.js';
 import { getWeekStart, getWeekEnd, formatWeekLabel } from '../utils/date-utils.js';
 import { getModelInfo } from '../utils/model-utils.js';
 import { costClass, sourceClass } from '../utils/class-utils.js';
 import { loadSessionConversation } from '../utils/session-detail-loader.js';
 
-// Global reference to most expensive session (set by main.js)
 let mostExpensiveFile = null;
 let mostExpensiveDate = null;
 
@@ -28,22 +20,11 @@ export function pushToSessionStore(session) {
     return _sessionDetailStore.length - 1;
 }
 
-/**
- * Set the most expensive session reference (called from main.js)
- *
- * @param {string} file - File path of most expensive session
- * @param {string} date - Date of most expensive session
- */
 export function setMostExpensive(file, date) {
     mostExpensiveFile = file;
     mostExpensiveDate = date;
 }
 
-/**
- * Toggle expansion state of a single day row.
- *
- * @param {string} date - The date string (YYYY-MM-DD) to toggle
- */
 export function toggleDay(date) {
     const row = document.getElementById('day-' + date);
     const detailWrapper = document.getElementById('detail-wrapper-' + date);
@@ -67,15 +48,10 @@ export function toggleDay(date) {
         }, 50);
     }
 
-    // Keep the toggle-all button label in sync
     const anyExpanded = document.querySelectorAll('.day-row.expanded').length > 0;
     updateToggleAllButton(anyExpanded);
 }
 
-/**
- * Toggle all day rows between expanded and collapsed states.
- * Includes staggered animation for visual effect.
- */
 export function toggleAllDays() {
     const dayRows = document.querySelectorAll('.day-row');
     if (dayRows.length === 0) return;
@@ -113,11 +89,6 @@ export function toggleAllDays() {
     updateToggleAllButton(shouldExpand);
 }
 
-/**
- * Update the "Expand All" / "Collapse All" button label and state.
- *
- * @param {boolean} anyExpanded - Whether any rows are currently expanded
- */
 export function updateToggleAllButton(anyExpanded) {
     const btn = document.getElementById('toggle-all-btn');
     if (!btn) return;
@@ -131,11 +102,6 @@ export function updateToggleAllButton(anyExpanded) {
     }
 }
 
-/**
- * Update the totals row in the table footer.
- *
- * @param {Array} sessions - Array of session objects to total
- */
 export function updateTotalsRow(sessions) {
     const tfoot = document.getElementById('sessions-tfoot');
     if (!tfoot) return;
@@ -167,17 +133,6 @@ export function updateTotalsRow(sessions) {
     </tr>`;
 }
 
-/**
- * Build the expandable detail panel HTML for a single day.
- *
- * Includes:
- * - Source breakdown cards with cost bars
- * - Detailed session sub-table
- *
- * @param {string} date - The date string (YYYY-MM-DD)
- * @param {Array} sessions - Array of session objects for this day
- * @returns {string} HTML string for the detail panel
- */
 export function buildDayDetail(date, sessions) {
     const bySource = {};
     sessions.forEach(s => {
@@ -258,14 +213,6 @@ export function buildDayDetail(date, sessions) {
         </div>`;
 }
 
-/**
- * Render the sessions table with day and week groupings.
- *
- * Groups sessions by date, then by ISO week (Monday-Sunday).
- * Each week shows individual day rows followed by a week summary row.
- *
- * @param {Array} sessions - Array of session objects to render
- */
 export function renderSessionTable(sessions) {
     resetSessionStore();
     _builtDays.clear();
@@ -286,22 +233,19 @@ export function renderSessionTable(sessions) {
         return;
     }
 
-    // Group dates into ISO weeks
-    const weekGroups = {}; // weekStart -> [dates]
+    const weekGroups = {};
     for (const date of sortedDates) {
         const ws = getWeekStart(date);
         if (!weekGroups[ws]) weekGroups[ws] = [];
         weekGroups[ws].push(date);
     }
 
-    // Sort week start dates in reverse order (newest first)
     const sortedWeeks = Object.keys(weekGroups).sort().reverse();
 
     let html = '';
     for (const weekStart of sortedWeeks) {
         const weekDates = weekGroups[weekStart];
 
-        // Accumulators for weekly totals
         let weekTotalCost = 0;
         let weekTotalInput = 0;
         let weekTotalOutput = 0;
@@ -310,7 +254,6 @@ export function renderSessionTable(sessions) {
         let weekTotalSessions = 0;
         const weekModels = new Set();
 
-        // Emit day rows for this week
         for (const date of weekDates) {
             const daySessions = byDate[date];
             let dayCost = 0, dayInput = 0, dayOutput = 0, dayCacheRead = 0, dayCacheWrite = 0;
@@ -329,7 +272,6 @@ export function renderSessionTable(sessions) {
                 return `<span class="model-badge ${mi.cls}">${mi.name}</span>`;
             }).join(' ');
 
-            // Accumulate into weekly totals
             weekTotalCost += dayCost;
             weekTotalInput += dayInput;
             weekTotalOutput += dayOutput;
@@ -356,7 +298,6 @@ export function renderSessionTable(sessions) {
             </td></tr>`;
         }
 
-        // Emit weekly summary row after all days in this week
         const weekLabel = formatWeekLabel(weekStart);
         html += `<tr class="week-row">
             <td colspan="8">
@@ -394,29 +335,20 @@ function escapeHTML(str) {
         .replace(/"/g, '&quot;');
 }
 
-function renderHistoryItems(turns, truncated) {
+function renderHistoryItems(turns, truncated, assistantLabel) {
     if (!turns || turns.length === 0) {
         return `<div class="history-empty">No conversation content recorded for this session.</div>`;
     }
+    const aiLabel = assistantLabel || 'Claude';
     const items = turns.map((h, i) => `
         <div class="history-msg history-${h.role} history-entering" style="animation-delay:${Math.min(i * 28, 420)}ms">
-            <div class="history-role">${h.role === 'user' ? 'You' : 'Claude'}</div>
+            <div class="history-role">${h.role === 'user' ? 'You' : aiLabel}</div>
             <div class="history-text">${escapeHTML(h.text)}</div>
         </div>`).join('');
     const tail = truncated ? '<div class="history-truncated">… conversation continues</div>' : '';
     return items + tail;
 }
 
-/**
- * Show the session detail modal for a given session index.
- *
- * Strategy for "instant open":
- *  1. Render meta + token stats + a skeleton history placeholder synchronously.
- *  2. Animate the modal in immediately.
- *  3. Kick off a lazy load of the full conversation from the original JSONL
- *     file (via the native Swift reply handler) and swap the skeleton for
- *     the real content with a staggered fade-in.
- */
 export function showSessionDetail(idx) {
     const s = _sessionDetailStore[idx];
     if (!s) return;
@@ -428,10 +360,12 @@ export function showSessionDetail(idx) {
     const titleText = s.title || '(untitled session)';
     const sessionId = s.sessionId || s.file?.replace('.jsonl', '') || '—';
     const hasSessionId = s.sessionId || (s.file && s.file.endsWith('.jsonl'));
-    const isClaudeCode = s.source === 'Claude Code';
-    const resumeCmd = `claude --resume ${sessionId}`;
+    const isCodex = s.provider === 'codex';
+    const canResume = isCodex || s.source === 'Claude Code';
+    const resumeCmd = isCodex
+        ? `codex resume ${sessionId}`
+        : `claude --resume ${sessionId}`;
 
-    // Show a skeleton while the JSONL file is being read & parsed.
     const skeletonHTML = `
         <div class="history-skeleton" aria-hidden="true">
             <div class="history-msg history-user skeleton-msg"><div class="skeleton-line w-30"></div><div class="skeleton-line w-80"></div></div>
@@ -472,6 +406,7 @@ export function showSessionDetail(idx) {
                 <div class="token-stat"><span class="token-stat-label">Output</span><span class="token-stat-value">${formatNumber(s.output_tokens || 0)}</span></div>
                 <div class="token-stat"><span class="token-stat-label">Cache Read</span><span class="token-stat-value">${formatNumber(s.cache_read || 0)}</span></div>
                 <div class="token-stat"><span class="token-stat-label">Cache Write</span><span class="token-stat-value">${formatNumber(s.cache_write || 0)}</span></div>
+                ${s.reasoning_tokens > 0 ? `<div class="token-stat"><span class="token-stat-label">Reasoning</span><span class="token-stat-value">${formatNumber(s.reasoning_tokens)}</span></div>` : ''}
                 <div class="token-stat"><span class="token-stat-label">Cost</span><span class="token-stat-value cost-value ${costClass(s.cost)}">$${s.cost.toFixed(2)}</span></div>
             </div>
             <div class="session-modal-history" data-request-id="${requestId}">
@@ -480,7 +415,7 @@ export function showSessionDetail(idx) {
                     ${skeletonHTML}
                 </div>
             </div>
-            ${hasSessionId && isClaudeCode ? `
+            ${hasSessionId && canResume ? `
             <div class="session-modal-resume">
                 <div class="resume-label">Resume this session</div>
                 <div class="resume-cmd-row">
@@ -511,15 +446,14 @@ export function showSessionDetail(idx) {
     }
     modal.innerHTML = modalHTML;
 
-    // Trigger modal-open animation on the next frame so the transition runs.
     requestAnimationFrame(() => {
         overlay.classList.add('visible');
         modal.classList.add('visible');
     });
 
-    // Kick off async conversation load. Race guard via requestId so clicking
-    // quickly between sessions always shows the latest one.
-    loadSessionConversation(s.filePath).then(result => {
+    // Race guard via requestId — quick session switches always show the latest.
+    const assistantLabel = s.provider === 'codex' ? 'Codex' : 'Claude';
+    loadSessionConversation(s.filePath, { provider: s.provider }).then(result => {
         if (requestId !== _sessionDetailRequestId) return;
         const section = modal.querySelector('.session-modal-history');
         if (!section || section.dataset.requestId !== String(requestId)) return;
@@ -531,19 +465,15 @@ export function showSessionDetail(idx) {
             return;
         }
 
-        // Fade the skeleton out, then swap to real content in one frame.
         timeline.classList.add('is-swapping');
         setTimeout(() => {
             if (requestId !== _sessionDetailRequestId) return;
-            timeline.innerHTML = renderHistoryItems(result.turns, result.truncated);
+            timeline.innerHTML = renderHistoryItems(result.turns, result.truncated, assistantLabel);
             timeline.classList.remove('is-swapping');
         }, 140);
     });
 }
 
-/**
- * Close the session detail modal.
- */
 export function closeSessionDetail() {
     const overlay = document.getElementById('session-modal-overlay');
     const modal = document.getElementById('session-modal');
@@ -551,9 +481,6 @@ export function closeSessionDetail() {
     if (modal) modal.classList.remove('visible');
 }
 
-/**
- * Copy a command string to clipboard and show feedback on the button.
- */
 export function copySessionCmd(cmd, btn) {
     navigator.clipboard.writeText(cmd).then(() => {
         const orig = btn.textContent;
@@ -563,10 +490,6 @@ export function copySessionCmd(cmd, btn) {
     });
 }
 
-/**
- * Initialize keyboard shortcuts for table interactions.
- * Shift+E toggles all day rows.
- */
 export function initKeyboardShortcuts(toggleAllFn) {
     const toggleAll = toggleAllFn || toggleAllDays;
     document.addEventListener('keydown', function(e) {
@@ -583,7 +506,6 @@ export function initKeyboardShortcuts(toggleAllFn) {
     });
 }
 
-// Make functions available globally for onclick handlers
 window.toggleDay = toggleDay;
 window.showSessionDetail = showSessionDetail;
 window.closeSessionDetail = closeSessionDetail;

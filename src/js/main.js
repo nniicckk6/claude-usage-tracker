@@ -1,25 +1,12 @@
-/**
- * main.js
- *
- * Main orchestrator for the Usage Tracker Dashboard.
- * Coordinates data loading and component initialization.
- */
-
-// === Imports ===
-
-// Config
 import { sourceColors, defaultColors, modelColorMap } from './config/constants.js';
 import { initChartDefaults } from './config/chart-config.js';
 
-// Utils
 import { formatNumber } from './utils/formatters.js';
 import { getWeekStart, getWeekEnd, formatWeekLabel } from './utils/date-utils.js';
 import { sourceClass } from './utils/class-utils.js';
 import { getModelInfo } from './utils/model-utils.js';
 
-// Components
 import { initCounterAnimations } from './components/animations.js';
-
 import { initCharts, clearDayFilter } from './components/charts.js';
 import {
     initFilterDropdowns,
@@ -47,16 +34,10 @@ import {
     recalcSummary
 } from './components/data-transfer.js';
 
-// === Global State ===
-
 let allSessionsData = [];
 let totalSessionCount = 0;
 let currentSessionView = 'timeline';
 
-// === Expose Functions to Window (for onclick handlers) ===
-
-// toggleDay and filter removal functions are already exposed by their respective modules
-// We just need to expose toggleAllDays and set up the filter callback
 window.toggleAllDays = toggleAllDays;
 window.toggleAllProjects = toggleAllProjects;
 window.clearDayFilter = clearDayFilter;
@@ -67,6 +48,14 @@ function getCurrentRenderer() {
 
 function applyCurrentFilters() {
     applyFilters(allSessionsData, totalSessionCount, getCurrentRenderer());
+}
+
+function applyProviderView(provider) {
+    const filtered = (!provider || provider === 'all')
+        ? allSessionsData
+        : allSessionsData.filter(s => (s.provider || 'claude') === provider);
+    const summary = recalcSummary(filtered);
+    reRenderDashboard(summary, filtered);
 }
 
 function toggleAllForCurrentView() {
@@ -99,36 +88,25 @@ function updateTableHeader(view) {
     cells[1].textContent = view === 'projects' ? 'Sources' : 'Sessions';
 }
 
-// === Main Data Loading Function ===
-
-/**
- * Load data from window globals and initialize all dashboard components.
- * This is the main entry point after the page loads.
- */
 async function loadData() {
     try {
-        // Load data from window globals
         const summary = window.__SUMMARY__;
         const openclawSessions = window.__OPENCLAW_SESSIONS__ || window.__CLAWDBOT_SESSIONS__ || [];
         const claudeSessions = window.__CLAUDE_SESSIONS__ || [];
+        const codexSessions = window.__CODEX_SESSIONS__ || [];
 
-        // Check if data is available
         if (!summary) {
             document.getElementById('sessions-body').innerHTML =
                 '<tr><td colspan="8" class="no-data">No data found. Run collect-usage.sh then reload.</td></tr>';
             return;
         }
 
-        // === Static Text Values ===
         document.getElementById('today-date').textContent = summary.today;
         document.getElementById('month-name').textContent = new Date(summary.today + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
         document.getElementById('last-updated').textContent = new Date(summary.generated_at).toLocaleString();
 
-        // === Monthly Projection ===
         renderMonthlyProjection(summary);
 
-        // === Prepare Animated Counter Elements ===
-        // Store target values as data attributes, set initial display to zero
         const todayCostEl = document.getElementById('today-cost');
         todayCostEl.dataset.target = summary.today_cost;
         todayCostEl.dataset.prefix = '$';
@@ -153,13 +131,14 @@ async function loadData() {
         sessionCountEl.dataset.decimals = '0';
         sessionCountEl.textContent = '0';
 
-        // === Combine All Sessions ===
-        const allSessions = [...openclawSessions, ...claudeSessions];
+        const claudeAll = [...openclawSessions, ...claudeSessions]
+            .map(s => s.provider ? s : { ...s, provider: 'claude' });
+        const codexAll = codexSessions
+            .map(s => s.provider ? s : { ...s, provider: 'codex' });
+        const allSessions = [...claudeAll, ...codexAll];
 
-        // === All-Time Since Date ===
         document.getElementById('total-since').textContent = formatSinceLabel(allSessions);
 
-        // === Calculate This Week Cost ===
         const thisWeekStart = getWeekStart(summary.today);
         const thisWeekEnd = getWeekEnd(thisWeekStart);
         const weekCost = allSessions
@@ -173,10 +152,8 @@ async function loadData() {
         weekCostEl.textContent = '$0.00';
         document.getElementById('week-range').textContent = formatWeekLabel(thisWeekStart);
 
-        // === Yesterday Delta ===
         updateYesterdayDelta(summary, allSessions);
 
-        // === Find Most Expensive Session ===
         const todaySessions = allSessions.filter(s => s.date === summary.today);
         let mostExpensiveSession = null;
         let mostExpensiveFile = null;
@@ -191,7 +168,6 @@ async function loadData() {
             mostExpensiveDate = mostExpensiveSession.date;
         }
 
-        // Populate the expensive session callout banner
         const callout = document.getElementById('expensive-session-callout');
         if (mostExpensiveSession && mostExpensiveSession.cost > 0) {
             const ms = mostExpensiveSession;
@@ -215,40 +191,24 @@ async function loadData() {
             callout.style.display = 'none';
         }
 
-        // Pass most expensive session info to sessions-table module
         setMostExpensive(mostExpensiveFile, mostExpensiveDate);
 
-        // === Store Global State ===
         allSessionsData = allSessions;
         totalSessionCount = allSessions.length;
 
-        // === Initialize Filter Dropdowns ===
         initFilterDropdowns(allSessions);
-
-        // === Render Session Table ===
         renderSessionTable(allSessions);
         updateFilterCount(allSessions.length, totalSessionCount);
 
-        // === Initialize Chart.js Defaults ===
         initChartDefaults();
-
-        // === Initialize Charts ===
         initCharts(allSessions);
-
-        // === Initialize Heatmap ===
         initHeatmap(allSessions);
-
-        // === Initialize Animated Counters ===
         initCounterAnimations();
 
-        // === Setup Filter Listeners ===
         window._applyFiltersCallback = applyCurrentFilters;
-        setupFilterListeners(applyCurrentFilters);
+        setupFilterListeners(applyCurrentFilters, applyProviderView);
 
-        // === Initialize Keyboard Shortcuts ===
         initKeyboardShortcuts(toggleAllForCurrentView);
-
-        // === Setup Session View Toggle ===
         setupSessionViewToggle();
 
     } catch (error) {
@@ -258,15 +218,12 @@ async function loadData() {
     }
 }
 
-// === Reload FAB Handler ===
-
 function initReloadButton() {
     const fab = document.getElementById('reload-fab');
     if (!fab) return;
 
     fab.addEventListener('click', () => {
         fab.classList.add('is-reloading');
-        // Fade out then trigger reload
         document.body.style.transition = 'opacity 0.25s ease-out';
         document.body.style.opacity = '0';
         setTimeout(() => {
@@ -278,8 +235,6 @@ function initReloadButton() {
         }, 250);
     });
 }
-
-// === Export / Import Handlers ===
 
 function initDataTransfer() {
     const exportBtn = document.getElementById('dt-export-btn');
@@ -296,31 +251,24 @@ function initDataTransfer() {
         const result = await importData();
         if (!result) return;
 
-        // Merge imported sessions with current data
         const merged = mergeSessions(allSessionsData, result.sessions);
         const newSummary = recalcSummary(merged);
 
-        // Update global state
         allSessionsData = merged;
         totalSessionCount = merged.length;
 
-        // Persist merged sessions to cache so it survives app restart
         try {
             window.webkit.messageHandlers.saveImportedData.postMessage(JSON.stringify(merged));
         } catch {
-            // Browser testing fallback — no persistence needed
+            // Browser fallback — no persistence.
         }
 
-        // Show import banner
         showImportBanner(result.sessions.length, merged.length);
-
-        // Re-render with merged data
         reRenderDashboard(newSummary, merged);
     });
 }
 
 function showImportBanner(importedCount, totalCount) {
-    // Remove existing banner
     const old = document.getElementById('dt-import-banner');
     if (old) old.remove();
 
@@ -339,14 +287,12 @@ function showImportBanner(importedCount, totalCount) {
 }
 
 function reRenderDashboard(summary, sessions) {
-    // Update stat card targets
     document.getElementById('today-cost').textContent = '$' + summary.today_cost.toFixed(2);
     document.getElementById('month-cost').textContent = '$' + summary.month_cost.toFixed(2);
     document.getElementById('total-cost').textContent = '$' + summary.totals.grand_total.toFixed(2);
     document.getElementById('total-since').textContent = formatSinceLabel(sessions);
     document.getElementById('session-count').textContent = sessions.length.toString();
 
-    // Recalc week cost
     const thisWeekStart = getWeekStart(summary.today);
     const thisWeekEnd = getWeekEnd(thisWeekStart);
     const weekCost = sessions
@@ -354,19 +300,18 @@ function reRenderDashboard(summary, sessions) {
         .reduce((sum, s) => sum + s.cost, 0);
     document.getElementById('week-cost').textContent = '$' + weekCost.toFixed(2);
 
-    // Re-render components
+    renderMonthlyProjection(summary);
+    updateYesterdayDelta(summary, sessions);
+
     initFilterDropdowns(sessions);
     getCurrentRenderer()(sessions);
     updateFilterCount(sessions.length, totalSessionCount);
     initCharts(sessions);
     initHeatmap(sessions);
 
-    // Re-bind filter callback
     window._applyFiltersCallback = applyCurrentFilters;
-    setupFilterListeners(applyCurrentFilters);
+    setupFilterListeners(applyCurrentFilters, applyProviderView);
 }
-
-// === Session View Toggle ===
 
 function setupSessionViewToggle() {
     const toggle = document.getElementById('sessions-view-toggle');
@@ -381,24 +326,18 @@ function setupSessionViewToggle() {
             const view = btn.dataset.view;
             if (view === currentSessionView) return;
 
-            // Update active button
             buttons.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            // Slide the slider
             if (view === 'projects') {
                 slider.style.transform = 'translateX(100%)';
             } else {
                 slider.style.transform = 'translateX(0)';
             }
 
-            // Update state
             currentSessionView = view;
-
-            // Update table header
             updateTableHeader(view);
 
-            // Update Expand All button onclick
             if (toggleAllBtn) {
                 toggleAllBtn.onclick = view === 'projects' ? toggleAllProjects : toggleAllDays;
             }
@@ -407,8 +346,6 @@ function setupSessionViewToggle() {
         });
     });
 }
-
-// === Initialize on DOM Ready ===
 
 function init() {
     loadData();

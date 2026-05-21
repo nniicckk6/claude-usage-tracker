@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Claude Usage Collector v4
- * 
- * Tracks usage across ALL local Claude tools:
+ * AI Usage Collector v4
+ *
+ * Tracks usage across local AI coding tools (Claude + Codex):
  *   ✅ OpenClaw / Clawdbot      (~/.openclaw/ , ~/.clawdbot/)
  *   ✅ Claude Code CLI           (~/.claude/projects/)
  *   ✅ Claude Desktop (Agent)    (~/Library/Application Support/Claude/local-agent-mode-sessions/)
@@ -77,7 +77,26 @@ function getPricing(model) {
   return { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 };
 }
 
-// Recursively find JSONL files
+// OpenAI API standard USD per 1M tokens. cacheWrite is 0 (no equivalent).
+function getCodexPricing(model) {
+  if (!model) return { input: 2.5, output: 15, cacheWrite: 0, cacheRead: 0.25 };
+  const m = model.toLowerCase().replace(/_/g, '-');
+  if (m.includes('gpt-5-5') || m.includes('gpt-5.5'))
+    return { input: 5.00, output: 30.00, cacheWrite: 0, cacheRead: 0.50 };
+  if (m.includes('gpt-5-4-mini') || m.includes('gpt-5.4-mini'))
+    return { input: 0.75, output: 4.50, cacheWrite: 0, cacheRead: 0.075 };
+  if (m.includes('gpt-5-4') || m.includes('gpt-5.4'))
+    return { input: 2.50, output: 15.00, cacheWrite: 0, cacheRead: 0.25 };
+  if (m.includes('gpt-5-3-codex') || m.includes('gpt-5.3-codex'))
+    return { input: 1.75, output: 14.00, cacheWrite: 0, cacheRead: 0.175 };
+  if (m.includes('gpt-5-2') || m.includes('gpt-5.2'))
+    return { input: 2.00, output: 10.00, cacheWrite: 0, cacheRead: 0.20 };
+  if (m.startsWith('gpt-') || m.includes('codex')) {
+    process.stderr.write(`[collect-usage] Unknown Codex model "${model}" — using gpt-5.4 pricing\n`);
+  }
+  return { input: 2.50, output: 15.00, cacheWrite: 0, cacheRead: 0.25 };
+}
+
 function findJsonl(dir, maxDepth = 10) {
   const results = [];
   if (maxDepth <= 0) return results;
@@ -95,12 +114,9 @@ function findJsonl(dir, maxDepth = 10) {
 }
 
 function makeDayEntry() {
-  return { cost: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, models: new Set(), times: [] };
+  return { cost: 0, input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0, reasoning_tokens: 0, models: new Set(), times: [] };
 }
 
-/**
- * Clean raw message text: strip XML tags, system markers, cron prefixes.
- */
 function cleanMessageText(text) {
   text = text.replace(/<[^>]+>[\s\S]*?<\/[^>]+>/g, '').trim();
   text = text.replace(/<[^>]+>/g, '').trim();
@@ -112,15 +128,11 @@ function cleanMessageText(text) {
   return text;
 }
 
-/**
- * Extract text content from a JSONL message entry's content field.
- */
 function extractText(msg) {
   if (!msg || typeof msg !== 'object') return '';
   const content = msg.content;
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
-    // Check if this is a tool_result (skip it)
     if (content.some(b => b.type === 'tool_result')) return '';
     const textBlock = content.find(c => c.type === 'text' && c.text && c.text.trim());
     return textBlock ? textBlock.text : '';
@@ -128,14 +140,8 @@ function extractText(msg) {
   return '';
 }
 
-/**
- * Extract lightweight session metadata from a JSONL file.
- * Full conversation history is NOT stored here — it is read on-demand from
- * the original JSONL file when the user opens the detail modal, so the
- * cache + data.js payload stays small and startup is fast.
- *
- * Returns: { title, sessionId, cwd }
- */
+// Conversation history is NOT stored here — it's read on-demand when the
+// user opens the detail modal, so the cache + data.js payload stays small.
 function extractSessionMeta(filePath) {
   const meta = { title: '', sessionId: '', cwd: '' };
   try {
@@ -147,18 +153,15 @@ function extractSessionMeta(filePath) {
       let entry;
       try { entry = JSON.parse(line); } catch { continue; }
 
-      // Extract sessionId and cwd from any entry that has them
       if (!meta.sessionId && entry.sessionId) meta.sessionId = entry.sessionId;
       if (!meta.cwd && entry.cwd) meta.cwd = entry.cwd;
 
-      // Skip non-conversation entries
       const msg = entry.message;
       if (!msg || typeof msg !== 'object') continue;
       const role = msg.role;
       if (role !== 'user' && role !== 'assistant') continue;
 
-      // We only need title + sessionId + cwd here. Bail as soon as we have
-      // everything we came for to avoid walking the full file.
+      // Bail as soon as we have everything to avoid walking the full file.
       if (foundTitle && meta.sessionId && meta.cwd) break;
 
       if (!foundTitle && role === 'user') {
@@ -171,7 +174,6 @@ function extractSessionMeta(filePath) {
       }
     }
   } catch {}
-  // Fallback: derive sessionId from filename
   if (!meta.sessionId) {
     const base = path.basename(filePath, '.jsonl');
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(base)) {
@@ -181,8 +183,10 @@ function extractSessionMeta(filePath) {
   return meta;
 }
 
-function pushSessions(sessions, dayData, source, fileName, meta, filePath) {
+function pushSessions(sessions, dayData, source, fileName, meta, filePath, provider) {
   meta = meta || {};
+  provider = provider || 'claude';
+  const effectiveSource = meta.source || source;
   for (const [date, data] of Object.entries(dayData)) {
     if (data.cost < 0.0001) continue;
     const models = [...data.models];
@@ -190,7 +194,8 @@ function pushSessions(sessions, dayData, source, fileName, meta, filePath) {
     const entry = {
       date,
       time,
-      source,
+      provider,
+      source: effectiveSource,
       file: fileName,
       cost: parseFloat(data.cost.toFixed(4)),
       input_tokens: data.input_tokens,
@@ -199,6 +204,7 @@ function pushSessions(sessions, dayData, source, fileName, meta, filePath) {
       cache_write: data.cache_write,
       model: models[models.length - 1] || ''
     };
+    if (data.reasoning_tokens) entry.reasoning_tokens = data.reasoning_tokens;
     if (filePath) entry.filePath = filePath;
     if (meta.title) entry.title = meta.title;
     if (meta.sessionId) entry.sessionId = meta.sessionId;
@@ -218,7 +224,6 @@ function loadCache() {
       console.warn('⚠️  Cache file has unexpected format, ignoring.');
       return [];
     }
-    // Per-entry validation: keep only entries with required fields
     const valid = data.filter(s =>
       s && typeof s.source === 'string' && typeof s.file === 'string' &&
       typeof s.date === 'string' && typeof s.cost === 'number'
@@ -226,15 +231,21 @@ function loadCache() {
     if (valid.length < data.length) {
       console.warn(`⚠️  Filtered out ${data.length - valid.length} malformed cache entries`);
     }
-    // Drop legacy embedded `history` field from older caches — detail is now
-    // loaded on-demand from the original JSONL, so keeping it just bloats
-    // memory and startup parse time.
+    // Pre-v4 caches embedded full history; details are now lazy-loaded.
     let strippedHistory = 0;
+    let backfilledProvider = 0;
     for (const s of valid) {
       if (s.history) { delete s.history; strippedHistory++; }
+      if (!s.provider) {
+        s.provider = (s.source && s.source.startsWith('Codex')) ? 'codex' : 'claude';
+        backfilledProvider++;
+      }
     }
     if (strippedHistory > 0) {
       console.log(`🗜️  Stripped legacy history from ${strippedHistory} cache entries`);
+    }
+    if (backfilledProvider > 0) {
+      console.log(`🔖 Backfilled provider on ${backfilledProvider} legacy cache entries`);
     }
     return valid;
   } catch (e) {
@@ -271,12 +282,8 @@ function mergeSessions(freshSessions, cachedSessions) {
 }
 
 // ─── Scan index (mtime fingerprint) ──────────────────────
-//
-// This is the big startup win: we remember every JSONL file's mtime+size
-// from the previous run and skip re-parsing files that haven't changed.
-// A typical launch touches ~10k files but only a handful have actually been
-// written to since last launch, so we can drop collector cost from ~20s to
-// well under a second on steady state.
+// Remember mtime+size per file from the previous run and skip re-parsing
+// files that haven't changed — drops steady-state launches from ~20s to <1s.
 
 function loadScanIndex() {
   try {
@@ -299,7 +306,6 @@ function saveScanIndex(index) {
   }
 }
 
-// Module-level scan state — populated in main().
 let _scanIndex = {};
 let _newScanIndex = {};
 let _cachedByFilePath = new Map();
@@ -307,12 +313,10 @@ const _seenFilePaths = new Set();
 let _skipCount = 0;
 let _parseCount = 0;
 
-/**
- * Scan one JSONL file: stat it, skip parsing if fingerprint is unchanged,
- * otherwise parse it with the supplied parser and append freshly-collected
- * session-day entries onto `sessions`.
- */
-function processJsonlFile(sessions, source, fullPath, parser) {
+function processJsonlFile(sessions, source, fullPath, parser, options) {
+  const opts = options || {};
+  const provider = opts.provider || 'claude';
+  const metaExtractor = opts.metaExtractor || extractSessionMeta;
   let stat;
   try { stat = fs.statSync(fullPath); } catch { return; }
   _seenFilePaths.add(fullPath);
@@ -320,7 +324,6 @@ function processJsonlFile(sessions, source, fullPath, parser) {
   const prev = _scanIndex[fullPath];
   const cached = _cachedByFilePath.get(fullPath);
   if (prev && cached && prev.mtime === stat.mtimeMs && prev.size === stat.size) {
-    // Unchanged — reuse cached entries verbatim, skip the file read entirely.
     for (const entry of cached) sessions.push(entry);
     _newScanIndex[fullPath] = prev;
     _skipCount++;
@@ -329,8 +332,8 @@ function processJsonlFile(sessions, source, fullPath, parser) {
 
   try {
     const dayData = parser(fullPath);
-    const meta = extractSessionMeta(fullPath);
-    pushSessions(sessions, dayData, source, path.basename(fullPath), meta, fullPath);
+    const meta = metaExtractor(fullPath);
+    pushSessions(sessions, dayData, source, path.basename(fullPath), meta, fullPath, provider);
     _newScanIndex[fullPath] = { mtime: stat.mtimeMs, size: stat.size };
     _parseCount++;
   } catch (e) {
@@ -339,8 +342,6 @@ function processJsonlFile(sessions, source, fullPath, parser) {
 }
 
 // ─── Parser: OpenClaw / Clawdbot format ──────────────────
-// usage fields: usage.input, usage.output, usage.cacheRead, usage.cacheWrite
-// OR pre-computed usage.cost.total
 function parseOpenClawFormat(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
@@ -357,8 +358,7 @@ function parseOpenClawFormat(filePath) {
     if (!usage.cost && !usage.input && !usage.output) continue;
 
     const model = (msg && msg.model) || entry.model || '';
-    // Only count entries that used a Claude model — OpenClaw also routes to
-    // non-Claude providers (free, gateway-injected, delivery-mirror, etc.)
+    // OpenClaw also routes non-Claude traffic — skip anything not on a Claude model.
     if (!model || !model.startsWith('claude')) continue;
 
     let tsMs = parseTimestamp(entry.timestamp) || parseTimestamp(msg && msg.timestamp);
@@ -391,8 +391,6 @@ function parseOpenClawFormat(filePath) {
 }
 
 // ─── Parser: Claude Code / Desktop / Cursor / Windsurf format ────
-// usage fields: usage.input_tokens, usage.output_tokens,
-//               usage.cache_creation_input_tokens, usage.cache_read_input_tokens
 function parseClaudeCodeFormat(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
@@ -437,8 +435,6 @@ function parseClaudeCodeFormat(filePath) {
 }
 
 // ─── Parser: Aider format ────────────────────────────────
-// Aider uses a different log format — .aider.input.history and .aider.chat.history
-// It also can write JSONL with litellm format
 function parseAiderFormat(filePath) {
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
@@ -450,7 +446,6 @@ function parseAiderFormat(filePath) {
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
 
-    // Aider litellm JSONL: { model, usage: { prompt_tokens, completion_tokens, total_tokens }, ... }
     const usage = entry.usage || entry.response?.usage;
     if (!usage) continue;
 
@@ -461,7 +456,7 @@ function parseAiderFormat(filePath) {
     if (inputTok === 0 && outputTok === 0) continue;
 
     let tsMs = parseTimestamp(entry.timestamp) || parseTimestamp(entry.created);
-    // Aider sometimes uses Unix epoch seconds
+    // Aider uses Unix epoch seconds.
     if (entry.created && typeof entry.created === 'number' && entry.created < 2000000000) {
       tsMs = entry.created * 1000;
     }
@@ -488,7 +483,6 @@ function parseAiderFormat(filePath) {
 }
 
 // ─── Parser: Continue.dev format ─────────────────────────
-// Continue stores in ~/.continue/sessions/ as JSON with completions
 function parseContinueFormat(filePath) {
   const dayData = {};
   try {
@@ -524,6 +518,148 @@ function parseContinueFormat(filePath) {
     }
   } catch {}
   return dayData;
+}
+
+// ─── Parser: Codex CLI format (~/.codex/sessions/**/rollout-*.jsonl) ────
+function parseCodexFormat(filePath) {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter(l => l.trim());
+  const dayData = {};
+  let fallbackDate = null;
+  try { fallbackDate = toLocalDate(fs.statSync(filePath).mtimeMs); } catch {}
+  let currentModel = '';
+  let lastCumulative = null;
+
+  for (const line of lines) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    const payload = entry.payload;
+    if (!payload || typeof payload !== 'object') continue;
+
+    if (entry.type === 'turn_context' && payload.model) {
+      currentModel = payload.model;
+      continue;
+    }
+
+    if (entry.type !== 'event_msg' || payload.type !== 'token_count') continue;
+    const info = payload.info;
+    if (!info) continue;
+
+    let usage = info.last_token_usage;
+    if (!usage && info.total_token_usage) {
+      // Diff against cumulative; clamp to 0 on mid-session resets.
+      const total = info.total_token_usage;
+      if (lastCumulative) {
+        usage = {
+          input_tokens: Math.max(0, (total.input_tokens || 0) - (lastCumulative.input_tokens || 0)),
+          cached_input_tokens: Math.max(0, (total.cached_input_tokens || 0) - (lastCumulative.cached_input_tokens || 0)),
+          output_tokens: Math.max(0, (total.output_tokens || 0) - (lastCumulative.output_tokens || 0)),
+          reasoning_output_tokens: Math.max(0, (total.reasoning_output_tokens || 0) - (lastCumulative.reasoning_output_tokens || 0)),
+        };
+      } else {
+        usage = {
+          input_tokens: total.input_tokens || 0,
+          cached_input_tokens: total.cached_input_tokens || 0,
+          output_tokens: total.output_tokens || 0,
+          reasoning_output_tokens: total.reasoning_output_tokens || 0,
+        };
+      }
+      lastCumulative = total;
+    } else if (info.total_token_usage) {
+      lastCumulative = info.total_token_usage;
+    }
+    if (!usage) continue;
+
+    const inputTok = usage.input_tokens || 0;
+    const cachedTok = usage.cached_input_tokens || 0;
+    const outputTok = usage.output_tokens || 0;
+    const reasoningTok = usage.reasoning_output_tokens || 0;
+    if (inputTok === 0 && outputTok === 0 && cachedTok === 0) continue;
+
+    let tsMs = parseTimestamp(entry.timestamp);
+    let date = tsMs ? toLocalDate(tsMs) : fallbackDate;
+    let time = tsMs ? toLocalTime(tsMs) : '00:00';
+    if (!date) continue;
+
+    if (!dayData[date]) dayData[date] = makeDayEntry();
+    const dd = dayData[date];
+    if (time) dd.times.push(time);
+    if (currentModel) dd.models.add(currentModel);
+
+    // OpenAI's input_tokens already includes cached; bill non-cached at full input rate.
+    const nonCached = Math.max(0, inputTok - cachedTok);
+    dd.input_tokens += inputTok;
+    dd.output_tokens += outputTok;
+    dd.cache_read += cachedTok;
+    dd.reasoning_tokens += reasoningTok;
+
+    const pricing = getCodexPricing(currentModel);
+    // Output already includes reasoning per OpenAI — do NOT add reasoning separately.
+    dd.cost += (nonCached * pricing.input + cachedTok * pricing.cacheRead + outputTok * pricing.output) / 1_000_000;
+  }
+  return dayData;
+}
+
+// Returns { title, sessionId, cwd, source } — source is one of
+// "Codex CLI" / "Codex Exec" / "Codex Review" / "Codex".
+function extractCodexMeta(filePath) {
+  const meta = { title: '', sessionId: '', cwd: '', source: 'Codex' };
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    let foundTitle = false;
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const payload = entry.payload;
+      if (!payload) continue;
+
+      if (entry.type === 'session_meta') {
+        if (!meta.sessionId && payload.id) meta.sessionId = payload.id;
+        if (!meta.cwd && payload.cwd) meta.cwd = payload.cwd;
+        const src = payload.source;
+        const subagent = (src && typeof src === 'object' && src.subagent)
+          || (payload.subagent);
+        if (subagent === 'review') {
+          meta.source = 'Codex Review';
+        } else if (src === 'cli' || (src && src.kind === 'cli')) {
+          meta.source = 'Codex CLI';
+        } else if (src === 'exec' || (src && src.kind === 'exec')) {
+          meta.source = 'Codex Exec';
+        } else {
+          meta.source = 'Codex';
+        }
+      }
+
+      if (!foundTitle && entry.type === 'response_item'
+          && payload.type === 'message' && payload.role === 'user'
+          && Array.isArray(payload.content)) {
+        for (const block of payload.content) {
+          if (!block) continue;
+          const text = typeof block === 'string'
+            ? block
+            : (block.text || '');
+          if (!text || !text.trim()) continue;
+          if (/^<environment_context>/i.test(text.trim())) continue;
+          if (/^<permissions instructions>/i.test(text.trim())) continue;
+          const cleaned = cleanMessageText(text).trim();
+          if (!cleaned) continue;
+          meta.title = cleaned.length > 80 ? cleaned.substring(0, 77) + '...' : cleaned;
+          foundTitle = true;
+          break;
+        }
+      }
+
+      if (foundTitle && meta.sessionId && meta.cwd) break;
+    }
+  } catch {}
+  if (!meta.sessionId) {
+    const base = path.basename(filePath, '.jsonl');
+    const m = base.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
+    if (m) meta.sessionId = m[1];
+  }
+  return meta;
 }
 
 // ─── Source Collectors ───────────────────────────────────
@@ -658,10 +794,24 @@ function collectContinue() {
   return sessions;
 }
 
+function collectCodex() {
+  const sessions = [];
+  const sessDir = path.join(HOME, '.codex/sessions');
+  if (!fs.existsSync(sessDir)) return sessions;
+  for (const filePath of findJsonl(sessDir)) {
+    if (!path.basename(filePath).startsWith('rollout-')) continue;
+    processJsonlFile(sessions, 'Codex', filePath, parseCodexFormat, {
+      provider: 'codex',
+      metaExtractor: extractCodexMeta,
+    });
+  }
+  return sessions;
+}
+
 // ─── Main ────────────────────────────────────────────────
 
-console.log('Claude Usage Collector v4');
-console.log('========================\n');
+console.log('AI Usage Collector v4');
+console.log('======================\n');
 
 const sources = [
   { name: 'OpenClaw / Clawdbot', fn: collectOpenClaw },
@@ -673,13 +823,12 @@ const sources = [
   { name: 'Roo Code',            fn: collectRooCode },
   { name: 'Aider',               fn: collectAider },
   { name: 'Continue.dev',        fn: collectContinue },
+  { name: 'Codex',               fn: collectCodex },
 ];
 
 let allSessions = [];
 const sourceResults = {};
 
-// Pre-load cache + scan index so processJsonlFile can skip unchanged files.
-// These populate module-level state used by processJsonlFile().
 const cachedSessions = loadCache();
 _scanIndex = loadScanIndex();
 _newScanIndex = {};
@@ -706,9 +855,8 @@ for (const { name, fn } of sources) {
 const scanMs = Date.now() - scanStartedAt;
 console.log(`\n⚡ Scan: ${_parseCount} parsed, ${_skipCount} skipped (unchanged) in ${scanMs}ms`);
 
-// Preserve historical/imported cache entries whose file wasn't visited this
-// run — either the original file is gone, or they were imported from another
-// machine and have no local filePath.
+// Preserve historical / cross-machine imported entries whose filePath isn't
+// resolvable on this run.
 let preservedHistorical = 0;
 for (const s of cachedSessions) {
   if (!s.filePath || !_seenFilePaths.has(s.filePath)) {
@@ -720,30 +868,35 @@ if (preservedHistorical > 0) {
   console.log(`📦 Preserved ${preservedHistorical} historical/imported entries`);
 }
 
-// Dedupe just in case: source|file|date must be unique.
 const dedupedMap = new Map();
 for (const s of allSessions) {
-  dedupedMap.set(`${s.source}|${s.file}|${s.date}`, s);
+  const p = s.provider || 'claude';
+  dedupedMap.set(`${p}|${s.source}|${s.file}|${s.date}`, s);
 }
 allSessions = [...dedupedMap.values()];
 console.log(`📊 Total after merge: ${allSessions.length} session-day entries\n`);
 
 saveScanIndex(_newScanIndex);
 
-// Generate summary
 const today = toLocalDate(Date.now());
 const currentMonth = today.substring(0, 7);
 
 const sourceTotals = {};
 const sourceCounts = {};
+const providerTotals = { claude: 0, codex: 0 };
 allSessions.forEach(s => {
   sourceTotals[s.source] = (sourceTotals[s.source] || 0) + s.cost;
   sourceCounts[s.source] = (sourceCounts[s.source] || 0) + 1;
+  const p = s.provider || 'claude';
+  providerTotals[p] = (providerTotals[p] || 0) + s.cost;
 });
 const grandTotal = allSessions.reduce((s, x) => s + x.cost, 0);
 
 for (const key of Object.keys(sourceTotals)) {
   sourceTotals[key] = parseFloat(sourceTotals[key].toFixed(2));
+}
+for (const key of Object.keys(providerTotals)) {
+  providerTotals[key] = parseFloat(providerTotals[key].toFixed(2));
 }
 
 const todayCost = allSessions.filter(s => s.date === today).reduce((s, x) => s + x.cost, 0);
@@ -757,6 +910,7 @@ const summary = {
     ...sourceTotals,
     grand_total: parseFloat(grandTotal.toFixed(2))
   },
+  provider_totals: providerTotals,
   today_cost: parseFloat(todayCost.toFixed(2)),
   month_cost: parseFloat(monthCost.toFixed(2)),
   session_counts: {
@@ -765,17 +919,18 @@ const summary = {
   }
 };
 
-// Separate sessions by type for backward-compatible data.js
-const openclawSessions = allSessions.filter(s => s.source === 'OpenClaw' || s.source === 'Clawdbot');
-const otherSessions = allSessions.filter(s => s.source !== 'OpenClaw' && s.source !== 'Clawdbot');
+const codexSessions = allSessions.filter(s => s.provider === 'codex');
+const claudeOnly = allSessions.filter(s => s.provider !== 'codex');
+const openclawSessions = claudeOnly.filter(s => s.source === 'OpenClaw' || s.source === 'Clawdbot');
+const otherSessions = claudeOnly.filter(s => s.source !== 'OpenClaw' && s.source !== 'Clawdbot');
 
-// Save cache (atomic write) before generating data.js
 saveCache(allSessions);
 
 const dataJs = `// Auto-generated by collect-usage.js v4 — ${new Date().toISOString()}
 window.__SUMMARY__ = ${JSON.stringify(summary, null, 2)};
 window.__OPENCLAW_SESSIONS__ = ${JSON.stringify(openclawSessions)};
 window.__CLAUDE_SESSIONS__ = ${JSON.stringify(otherSessions)};
+window.__CODEX_SESSIONS__ = ${JSON.stringify(codexSessions)};
 `;
 fs.writeFileSync(path.join(OUTPUT_DIR, 'data.js'), dataJs);
 console.log(`📄 Data written to: ${path.join(OUTPUT_DIR, 'data.js')}`);

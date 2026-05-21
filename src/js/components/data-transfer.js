@@ -1,22 +1,21 @@
-/**
- * data-transfer.js
- *
- * Export and import session data as JSON for cross-device viewing.
- * Uses native WKWebView message handlers (NSSavePanel / NSOpenPanel).
- */
+const EXPORT_VERSION = 2;
+const EXPORT_FORMAT = 'ai-usage-tracker';
+// Pre-rename exports used 'claude-usage-tracker' — still accepted on import.
+const ACCEPTED_FORMATS = new Set(['ai-usage-tracker', 'claude-usage-tracker']);
 
-const EXPORT_VERSION = 1;
+// v1 exports predate the `provider` field — tag those as Claude.
+function backfillLegacyProvider(data) {
+    const ver = Number(data._version) || 1;
+    if (ver >= 2) return;
+    for (const s of data.sessions) {
+        if (s && !s.provider) s.provider = 'claude';
+    }
+    data._version = EXPORT_VERSION;
+}
 
-/**
- * Export all session data as a downloadable JSON file.
- * Sends data to native Swift handler which shows NSSavePanel.
- *
- * @param {Object} summary - The __SUMMARY__ object
- * @param {Array} sessions - All session objects
- */
 export function exportData(summary, sessions) {
     const payload = {
-        _format: 'claude-usage-tracker',
+        _format: EXPORT_FORMAT,
         _version: EXPORT_VERSION,
         exported_at: new Date().toISOString(),
         summary,
@@ -28,13 +27,12 @@ export function exportData(summary, sessions) {
     try {
         window.webkit.messageHandlers.exportData.postMessage(json);
     } catch {
-        // Fallback for browser testing
         const blob = new Blob([json], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const dateStr = new Date().toISOString().slice(0, 10);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `claude-usage-${dateStr}.json`;
+        a.download = `ai-usage-${dateStr}.json`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -43,26 +41,19 @@ export function exportData(summary, sessions) {
     }
 }
 
-/**
- * Prompt user to pick a JSON file and import its session data.
- * Uses native NSOpenPanel via Swift message handler.
- * Returns a promise that resolves to the parsed payload, or null on cancel/error.
- *
- * @returns {Promise<{summary: Object, sessions: Array}|null>}
- */
 export function importData() {
     return new Promise((resolve) => {
-        // Store the resolver on window so Swift can call back
         window._importDataResolver = (jsonString) => {
             delete window._importDataResolver;
             if (!jsonString) return resolve(null);
 
             try {
                 const data = JSON.parse(jsonString);
-                if (data._format !== 'claude-usage-tracker' || !Array.isArray(data.sessions)) {
+                if (!ACCEPTED_FORMATS.has(data._format) || !Array.isArray(data.sessions)) {
                     showToast('Invalid file format', true);
                     return resolve(null);
                 }
+                backfillLegacyProvider(data);
                 showToast('Imported ' + data.sessions.length + ' sessions');
                 resolve(data);
             } catch {
@@ -74,7 +65,6 @@ export function importData() {
         try {
             window.webkit.messageHandlers.importData.postMessage('');
         } catch {
-            // Fallback for browser testing
             delete window._importDataResolver;
             const input = document.createElement('input');
             input.type = 'file';
@@ -86,10 +76,11 @@ export function importData() {
                 reader.onload = () => {
                     try {
                         const data = JSON.parse(reader.result);
-                        if (data._format !== 'claude-usage-tracker' || !Array.isArray(data.sessions)) {
+                        if (!ACCEPTED_FORMATS.has(data._format) || !Array.isArray(data.sessions)) {
                             showToast('Invalid file format', true);
                             return resolve(null);
                         }
+                        backfillLegacyProvider(data);
                         showToast('Imported ' + data.sessions.length + ' sessions');
                         resolve(data);
                     } catch {
@@ -105,19 +96,12 @@ export function importData() {
     });
 }
 
-/**
- * Merge imported sessions with existing sessions, deduplicating by source+file+date.
- * Mirrors the collector's dedup key — sessionId alone is not unique because
- * Claude Code sub-agents share one sessionId across multiple .jsonl files.
- *
- * @param {Array} existing - Current session array
- * @param {Array} incoming - Imported session array
- * @returns {Array} Merged and sorted sessions
- */
+// sessionId alone is not unique: Claude Code sub-agents share one sessionId
+// across multiple .jsonl files — mirror the collector's full key here.
 export function mergeSessions(existing, incoming) {
     const seen = new Set();
     const merged = [];
-    const keyOf = (s) => (s.source || '') + '|' + (s.file || '') + '|' + s.date;
+    const keyOf = (s) => (s.provider || 'claude') + '|' + (s.source || '') + '|' + (s.file || '') + '|' + s.date;
 
     for (const s of existing) {
         seen.add(keyOf(s));
@@ -132,7 +116,6 @@ export function mergeSessions(existing, incoming) {
         }
     }
 
-    // Sort newest first
     merged.sort((a, b) => {
         if (a.date !== b.date) return b.date.localeCompare(a.date);
         return (b.time || '').localeCompare(a.time || '');
@@ -141,12 +124,6 @@ export function mergeSessions(existing, incoming) {
     return merged;
 }
 
-/**
- * Recalculate summary totals from a session array.
- *
- * @param {Array} sessions - All sessions
- * @returns {Object} Updated summary
- */
 export function recalcSummary(sessions) {
     const today = new Date().toISOString().slice(0, 10);
     const currentMonth = today.slice(0, 7);
@@ -181,8 +158,6 @@ export function recalcSummary(sessions) {
     };
 }
 
-// ── Toast notification (also called from Swift via window._showExportToast) ──
-
 let toastTimer = null;
 
 export function showToast(message, isError = false) {
@@ -198,7 +173,6 @@ export function showToast(message, isError = false) {
     toast.classList.toggle('dt-toast-error', isError);
     toast.classList.remove('dt-toast-visible');
 
-    // force reflow
     void toast.offsetWidth;
     toast.classList.add('dt-toast-visible');
 
@@ -208,5 +182,4 @@ export function showToast(message, isError = false) {
     }, 2500);
 }
 
-// Expose toast to Swift callbacks
 window._showExportToast = (msg, isErr) => showToast(msg, isErr);

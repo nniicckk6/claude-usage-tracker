@@ -1,13 +1,6 @@
-/**
- * session-detail-loader.js
- *
- * Lazy loader for per-session conversation history. The dashboard no longer
- * ships embedded `history[]` arrays in data.js — instead the original JSONL
- * file is read on demand (via the native Swift `loadSessionDetail` reply
- * handler) the first time the user opens a session detail modal.
- *
- * Results are memoized in-memory per filePath so re-opening a row is instant.
- */
+// Lazy loader for per-session conversation history. JSONL files are read
+// on demand via the native Swift `loadSessionDetail` reply handler and
+// memoized per filePath so re-opening a row is instant.
 
 const _cache = new Map();
 
@@ -37,11 +30,52 @@ function extractText(msg) {
     return '';
 }
 
-/**
- * Parse a raw JSONL string into a chronological conversation array.
- * @param {string} raw — contents of the .jsonl file
- * @returns {Array<{role: 'user'|'ai', text: string}>}
- */
+// Reasoning/tool/encrypted blocks are filtered out — internal model state
+// must not reach the UI.
+export function parseCodexConversation(raw) {
+    if (!raw) return [];
+    const out = [];
+    const lines = raw.split('\n');
+    for (const line of lines) {
+        if (!line.trim()) continue;
+        let entry;
+        try { entry = JSON.parse(line); } catch { continue; }
+        const payload = entry && entry.payload;
+        if (!payload || typeof payload !== 'object') continue;
+
+        const pt = payload.type;
+        if (pt !== 'message' && pt !== 'user_message' && pt !== 'agent_message') continue;
+        const role = payload.role;
+        if (role !== 'user' && role !== 'assistant') continue;
+
+        let text = '';
+        const content = payload.content;
+        if (typeof content === 'string') {
+            text = content;
+        } else if (Array.isArray(content)) {
+            for (const block of content) {
+                if (!block) continue;
+                if (typeof block === 'string') { text += block; continue; }
+                if (block.type === 'reasoning') continue;
+                const btext = block.text || block.value || '';
+                if (typeof btext === 'string') text += btext;
+            }
+        }
+        if (!text || !text.trim()) continue;
+        if (/^<environment_context>/i.test(text.trim())) continue;
+        if (/^<permissions instructions>/i.test(text.trim())) continue;
+
+        const cleaned = cleanMessageText(text);
+        if (!cleaned) continue;
+        const truncated = cleaned.length > MAX_TEXT_LEN
+            ? cleaned.substring(0, MAX_TEXT_LEN - 1) + '…'
+            : cleaned;
+        out.push({ role: role === 'user' ? 'user' : 'ai', text: truncated });
+        if (out.length >= MAX_TURNS) break;
+    }
+    return out;
+}
+
 export function parseJsonlConversation(raw) {
     if (!raw) return [];
     const out = [];
@@ -67,20 +101,14 @@ export function parseJsonlConversation(raw) {
     return out;
 }
 
-/**
- * Load + parse a session's conversation history. Uses the native
- * `loadSessionDetail` reply handler when available and falls back to a
- * browser-mode fetch for local development.
- *
- * @param {string} filePath absolute path of the JSONL file
- * @returns {Promise<{turns: Array, truncated: boolean, error?: string}>}
- */
-export async function loadSessionConversation(filePath) {
+export async function loadSessionConversation(filePath, opts) {
     if (!filePath) {
         return { turns: [], truncated: false, error: 'No file reference for this session.' };
     }
-    if (_cache.has(filePath)) {
-        return _cache.get(filePath);
+    const provider = (opts && opts.provider) || 'claude';
+    const cacheKey = provider + '|' + filePath;
+    if (_cache.has(cacheKey)) {
+        return _cache.get(cacheKey);
     }
 
     let raw = null;
@@ -89,11 +117,8 @@ export async function loadSessionConversation(filePath) {
     try {
         const handler = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.loadSessionDetail;
         if (handler && typeof handler.postMessage === 'function') {
-            // WKScriptMessageHandlerWithReply → postMessage returns a Promise
             raw = await handler.postMessage(filePath);
         } else {
-            // Browser fallback — only works when dashboard is served with
-            // read access to the file (rare, but useful for local dev).
             const resp = await fetch('file://' + filePath);
             if (resp.ok) raw = await resp.text();
         }
@@ -102,22 +127,22 @@ export async function loadSessionConversation(filePath) {
     }
 
     if (!raw) {
-        const result = {
+        // Don't cache transient failures so a retry can succeed.
+        return {
             turns: [],
             truncated: false,
             error: errorMessage || 'Conversation is not available for this session.'
         };
-        // Do not cache transient failures so a retry can succeed.
-        return result;
     }
 
-    const turns = parseJsonlConversation(raw);
+    const turns = provider === 'codex'
+        ? parseCodexConversation(raw)
+        : parseJsonlConversation(raw);
     const result = { turns, truncated: turns.length >= MAX_TURNS };
-    _cache.set(filePath, result);
+    _cache.set(cacheKey, result);
     return result;
 }
 
-/** Clear the in-memory cache (used on reload / import). */
 export function clearSessionDetailCache() {
     _cache.clear();
 }

@@ -57,6 +57,12 @@
     border: 1px solid rgba(251, 191, 36, 0.2);
 }
 
+.source-codex {
+    background: rgba(16, 163, 127, 0.12);
+    color: #10a37f;
+    border: 1px solid rgba(16, 163, 127, 0.25);
+}
+
 .model-badge {
     display: inline-block;
     padding: 3px 8px;
@@ -83,6 +89,24 @@
     background: var(--accent-emerald-dim);
     color: var(--accent-emerald);
     border: 1px solid rgba(52, 211, 153, 0.2);
+}
+
+.model-gpt-frontier {
+    background: rgba(16, 163, 127, 0.12);
+    color: #10a37f;
+    border: 1px solid rgba(16, 163, 127, 0.25);
+}
+
+.model-gpt-mini {
+    background: rgba(132, 204, 22, 0.12);
+    color: #84cc16;
+    border: 1px solid rgba(132, 204, 22, 0.25);
+}
+
+.model-codex {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.25);
 }
 
 .cost-badge {

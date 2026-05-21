@@ -1,36 +1,26 @@
-/**
- * filters.js
- *
- * Session filtering system with multi-criteria support:
- * - Source filtering (checkboxes)
- * - Model filtering (checkboxes)
- * - Date range filtering
- * - Minimum cost filtering
- * - Filter chips for active filters
- */
-
 import { getModelInfo } from '../utils/model-utils.js';
 import { sourceClass } from '../utils/class-utils.js';
 
-/**
- * Initialize filter dropdowns with data from sessions.
- * Populates source and model checkboxes, sets date input ranges.
- *
- * @param {Array} sessions - Array of all session objects
- */
+// 'all' | 'claude' | 'codex'
+const _state = { provider: 'all' };
+
+export function providerForSource(name) {
+    return (name && name.startsWith('Codex')) ? 'codex' : 'claude';
+}
+
 export function initFilterDropdowns(sessions) {
-    // Collect unique sources
     const sources = [...new Set(sessions.map(s => s.source))].sort();
     const sourceDropdown = document.getElementById('source-dropdown');
     sourceDropdown.innerHTML = sources.map(source => {
         const sc = sourceClass(source);
-        return `<label>
+        const sp = providerForSource(source);
+        return `<label data-provider="${sp}">
             <input type="checkbox" value="${source}" data-filter="source" />
             <span class="source-badge source-${sc}">${source}</span>
         </label>`;
     }).join('');
+    applyProviderDimming();
 
-    // Collect unique models (use display name, store raw value)
     const modelMap = {};
     sessions.forEach(s => {
         if (s.model) {
@@ -40,11 +30,13 @@ export function initFilterDropdowns(sessions) {
             }
         }
     });
-    // Sort by family then name
     const modelEntries = Object.entries(modelMap).sort((a, b) => {
-        const order = { 'model-opus': 0, 'model-sonnet': 1, 'model-haiku': 2 };
-        const aOrder = order[a[1].cls] ?? 3;
-        const bOrder = order[b[1].cls] ?? 3;
+        const order = {
+            'model-opus': 0, 'model-sonnet': 1, 'model-haiku': 2,
+            'model-gpt-frontier': 3, 'model-gpt-mini': 4, 'model-codex': 5,
+        };
+        const aOrder = order[a[1].cls] ?? 9;
+        const bOrder = order[b[1].cls] ?? 9;
         if (aOrder !== bOrder) return aOrder - bOrder;
         return a[1].name.localeCompare(b[1].name);
     });
@@ -57,7 +49,6 @@ export function initFilterDropdowns(sessions) {
         </label>`;
     }).join('');
 
-    // Set date input min/max from data
     if (sessions.length > 0) {
         const dates = sessions.map(s => s.date).sort();
         const minDate = dates[0];
@@ -69,13 +60,9 @@ export function initFilterDropdowns(sessions) {
     }
 }
 
-/**
- * Get currently active filter values from the UI.
- *
- * @returns {Object} Filter object with sources, models, dateFrom, dateTo, minCost
- */
 export function getActiveFilters() {
     const filters = {
+        provider: _state.provider,
         sources: [],
         models: [],
         dateFrom: null,
@@ -83,23 +70,19 @@ export function getActiveFilters() {
         minCost: null,
     };
 
-    // Collect checked sources
     document.querySelectorAll('#source-dropdown input[type="checkbox"]:checked').forEach(cb => {
         filters.sources.push(cb.value);
     });
 
-    // Collect checked models
     document.querySelectorAll('#model-dropdown input[type="checkbox"]:checked').forEach(cb => {
         filters.models.push(cb.value);
     });
 
-    // Date range
     const dateFrom = document.getElementById('filter-date-from').value;
     const dateTo = document.getElementById('filter-date-to').value;
     if (dateFrom) filters.dateFrom = dateFrom;
     if (dateTo) filters.dateTo = dateTo;
 
-    // Min cost
     const minCostVal = document.getElementById('filter-min-cost').value;
     if (minCostVal !== '' && !isNaN(parseFloat(minCostVal))) {
         filters.minCost = parseFloat(minCostVal);
@@ -108,86 +91,42 @@ export function getActiveFilters() {
     return filters;
 }
 
-/**
- * Filter sessions based on active filter criteria.
- *
- * @param {Array} sessions - Array of all session objects
- * @param {Object} filters - Filter object from getActiveFilters()
- * @returns {Array} Filtered array of session objects
- */
 export function filterSessions(sessions, filters) {
     return sessions.filter(s => {
-        // Source filter (OR within)
-        if (filters.sources.length > 0 && !filters.sources.includes(s.source)) {
-            return false;
+        if (filters.provider && filters.provider !== 'all') {
+            const sp = s.provider || providerForSource(s.source);
+            if (sp !== filters.provider) return false;
         }
-
-        // Model filter (OR within)
-        if (filters.models.length > 0 && !filters.models.includes(s.model)) {
-            return false;
-        }
-
-        // Date from (inclusive)
-        if (filters.dateFrom && s.date < filters.dateFrom) {
-            return false;
-        }
-
-        // Date to (inclusive)
-        if (filters.dateTo && s.date > filters.dateTo) {
-            return false;
-        }
-
-        // Min cost
-        if (filters.minCost !== null && s.cost < filters.minCost) {
-            return false;
-        }
-
+        if (filters.sources.length > 0 && !filters.sources.includes(s.source)) return false;
+        if (filters.models.length > 0 && !filters.models.includes(s.model)) return false;
+        if (filters.dateFrom && s.date < filters.dateFrom) return false;
+        if (filters.dateTo && s.date > filters.dateTo) return false;
+        if (filters.minCost !== null && s.cost < filters.minCost) return false;
         return true;
     });
 }
 
-/**
- * Apply filters and re-render the table.
- * Updates filter button states, clear button visibility, and filter chips.
- *
- * @param {Array} allSessionsData - Global array of all sessions
- * @param {number} totalSessionCount - Total number of sessions
- * @param {Function} renderCallback - Callback to re-render table with filtered data
- */
 export function applyFilters(allSessionsData, totalSessionCount, renderCallback) {
     const filters = getActiveFilters();
-    const hasAnyFilter = filters.sources.length > 0
+    const hasProviderFilter = filters.provider && filters.provider !== 'all';
+    const hasAnyFilter = hasProviderFilter
+        || filters.sources.length > 0
         || filters.models.length > 0
         || filters.dateFrom !== null
         || filters.dateTo !== null
         || filters.minCost !== null;
     const filtered = hasAnyFilter ? filterSessions(allSessionsData, filters) : allSessionsData;
 
-    // Re-render the table with filtered sessions
     renderCallback(filtered);
-
-    // Update session count
     updateFilterCount(filtered.length, totalSessionCount);
 
-    // Update filter button active states
-    const sourceBtn = document.getElementById('source-filter-btn');
-    sourceBtn.classList.toggle('active', filters.sources.length > 0);
-
-    const modelBtn = document.getElementById('model-filter-btn');
-    modelBtn.classList.toggle('active', filters.models.length > 0);
-
+    document.getElementById('source-filter-btn').classList.toggle('active', filters.sources.length > 0);
+    document.getElementById('model-filter-btn').classList.toggle('active', filters.models.length > 0);
     document.getElementById('filter-clear-btn').classList.toggle('visible', hasAnyFilter);
 
-    // Render chips
     renderFilterChips(filters);
 }
 
-/**
- * Update the filter count display showing filtered vs total sessions.
- *
- * @param {number} shown - Number of sessions after filtering
- * @param {number} total - Total number of sessions
- */
 export function updateFilterCount(shown, total) {
     const el = document.getElementById('filter-count');
     if (shown === total) {
@@ -197,11 +136,6 @@ export function updateFilterCount(shown, total) {
     }
 }
 
-/**
- * Render filter chips showing active filters with remove buttons.
- *
- * @param {Object} filters - Filter object from getActiveFilters()
- */
 export function renderFilterChips(filters) {
     const container = document.getElementById('filter-chips');
     let html = '';
@@ -245,86 +179,88 @@ export function renderFilterChips(filters) {
     container.innerHTML = html;
 }
 
-/**
- * Remove a specific source filter.
- *
- * @param {string} source - Source name to remove from filter
- */
 export function removeSourceFilter(source) {
     const cb = document.querySelector(`#source-dropdown input[value="${source}"]`);
     if (cb) cb.checked = false;
-    // applyFilters will be called by the caller
 }
 
-/**
- * Remove a specific model filter.
- *
- * @param {string} model - Model identifier to remove from filter
- */
 export function removeModelFilter(model) {
     const cb = document.querySelector(`#model-dropdown input[value="${model}"]`);
     if (cb) cb.checked = false;
-    // applyFilters will be called by the caller
 }
 
-/**
- * Remove the date-from filter.
- */
 export function removeDateFromFilter() {
     document.getElementById('filter-date-from').value = '';
-    // applyFilters will be called by the caller
 }
 
-/**
- * Remove the date-to filter.
- */
 export function removeDateToFilter() {
     document.getElementById('filter-date-to').value = '';
-    // applyFilters will be called by the caller
 }
 
-/**
- * Remove the minimum cost filter.
- */
 export function removeMinCostFilter() {
     document.getElementById('filter-min-cost').value = '';
-    // applyFilters will be called by the caller
 }
 
-/**
- * Clear all active filters and reset UI.
- */
 export function clearAllFilters() {
-    // Uncheck all source checkboxes
     document.querySelectorAll('#source-dropdown input[type="checkbox"]').forEach(cb => {
         cb.checked = false;
     });
-
-    // Uncheck all model checkboxes
     document.querySelectorAll('#model-dropdown input[type="checkbox"]').forEach(cb => {
         cb.checked = false;
     });
-
-    // Clear date inputs
     document.getElementById('filter-date-from').value = '';
     document.getElementById('filter-date-to').value = '';
-
-    // Clear min cost
     document.getElementById('filter-min-cost').value = '';
-
-    // Close any open dropdowns
     closeAllDropdowns();
-
-    // applyFilters will be called by the caller
 }
 
-/**
- * Setup event listeners for all filter controls.
- *
- * @param {Function} applyFiltersCallback - Callback to apply filters when changed
- */
-export function setupFilterListeners(applyFiltersCallback) {
-    // Dropdown toggle for Source
+function applyProviderDimming() {
+    const dropdown = document.getElementById('source-dropdown');
+    if (!dropdown) return;
+    const p = _state.provider;
+    dropdown.querySelectorAll('label[data-provider]').forEach(label => {
+        const lp = label.getAttribute('data-provider');
+        if (p === 'all' || lp === p) {
+            label.style.opacity = '';
+            label.style.display = '';
+        } else {
+            label.style.opacity = '0.35';
+        }
+    });
+}
+
+function setupProviderPills(applyFiltersCallback, onProviderChange) {
+    const container = document.getElementById('provider-pills');
+    if (!container) return;
+    container.querySelectorAll('button[data-provider]').forEach(b => {
+        b.classList.toggle('active', b.getAttribute('data-provider') === _state.provider);
+    });
+    if (container._pillHandler) {
+        container.removeEventListener('click', container._pillHandler);
+    }
+    const handler = (e) => {
+        const btn = e.target.closest('button[data-provider]');
+        if (!btn) return;
+        const next = btn.getAttribute('data-provider');
+        if (!next || next === _state.provider) return;
+        _state.provider = next;
+        container.querySelectorAll('button[data-provider]').forEach(b => {
+            b.classList.toggle('active', b === btn);
+        });
+        applyProviderDimming();
+        if (typeof onProviderChange === 'function') {
+            onProviderChange(next);
+        } else {
+            applyFiltersCallback();
+        }
+    };
+    container.addEventListener('click', handler);
+    container._pillHandler = handler;
+}
+
+export function setupFilterListeners(applyFiltersCallback, onProviderChange) {
+    setupProviderPills(applyFiltersCallback, onProviderChange);
+
     const sourceBtn = document.getElementById('source-filter-btn');
     const sourceDropdown = document.getElementById('source-dropdown');
     sourceBtn.addEventListener('click', (e) => {
@@ -337,7 +273,6 @@ export function setupFilterListeners(applyFiltersCallback) {
         }
     });
 
-    // Dropdown toggle for Model
     const modelBtn = document.getElementById('model-filter-btn');
     const modelDropdown = document.getElementById('model-dropdown');
     modelBtn.addEventListener('click', (e) => {
@@ -350,80 +285,59 @@ export function setupFilterListeners(applyFiltersCallback) {
         }
     });
 
-    // Close dropdowns when clicking outside
     document.addEventListener('click', (e) => {
         if (!e.target.closest('.filter-group')) {
             closeAllDropdowns();
         }
     });
 
-    // Prevent dropdown close when clicking inside dropdown
     sourceDropdown.addEventListener('click', (e) => e.stopPropagation());
     modelDropdown.addEventListener('click', (e) => e.stopPropagation());
 
-    // Checkbox change listeners (delegated)
     sourceDropdown.addEventListener('change', () => applyFiltersCallback());
     modelDropdown.addEventListener('change', () => applyFiltersCallback());
 
-    // Date input listeners
     document.getElementById('filter-date-from').addEventListener('change', () => applyFiltersCallback());
     document.getElementById('filter-date-to').addEventListener('change', () => applyFiltersCallback());
 
-    // Min cost listener (debounced for typing)
     let costTimeout;
     document.getElementById('filter-min-cost').addEventListener('input', () => {
         clearTimeout(costTimeout);
         costTimeout = setTimeout(() => applyFiltersCallback(), 300);
     });
 
-    // Clear all button
     document.getElementById('filter-clear-btn').addEventListener('click', () => {
         clearAllFilters();
         applyFiltersCallback();
     });
 }
 
-/**
- * Close all open filter dropdowns.
- */
 export function closeAllDropdowns() {
     document.querySelectorAll('.filter-dropdown').forEach(d => d.classList.remove('open'));
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('open'));
 }
 
-// Make filter removal functions available globally for onclick handlers
 window.removeSourceFilter = function(source) {
     removeSourceFilter(source);
-    // Trigger applyFilters from global context
-    if (window._applyFiltersCallback) {
-        window._applyFiltersCallback();
-    }
+    if (window._applyFiltersCallback) window._applyFiltersCallback();
 };
 
 window.removeModelFilter = function(model) {
     removeModelFilter(model);
-    if (window._applyFiltersCallback) {
-        window._applyFiltersCallback();
-    }
+    if (window._applyFiltersCallback) window._applyFiltersCallback();
 };
 
 window.removeDateFromFilter = function() {
     removeDateFromFilter();
-    if (window._applyFiltersCallback) {
-        window._applyFiltersCallback();
-    }
+    if (window._applyFiltersCallback) window._applyFiltersCallback();
 };
 
 window.removeDateToFilter = function() {
     removeDateToFilter();
-    if (window._applyFiltersCallback) {
-        window._applyFiltersCallback();
-    }
+    if (window._applyFiltersCallback) window._applyFiltersCallback();
 };
 
 window.removeMinCostFilter = function() {
     removeMinCostFilter();
-    if (window._applyFiltersCallback) {
-        window._applyFiltersCallback();
-    }
+    if (window._applyFiltersCallback) window._applyFiltersCallback();
 };

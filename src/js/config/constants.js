@@ -1,17 +1,3 @@
-/**
- * Constants Module
- *
- * Contains all constant values used throughout the application:
- * - Source color palette for charts
- * - Default fallback colors
- * - Model pricing tiers
- * - Day name arrays for heatmap
- */
-
-/**
- * Source color palette mapping source names to hex colors.
- * Used by charts to ensure consistent color coding across visualizations.
- */
 export const sourceColors = {
     'OpenClaw': '#fbbf24',
     'Clawdbot': '#fbbf24',
@@ -23,32 +9,29 @@ export const sourceColors = {
     'Roo Code': '#f472b6',
     'Aider': '#2dd4bf',
     'Continue': '#f59e0b',
+    'Codex': '#10a37f',
+    'Codex CLI': '#10a37f',
+    'Codex Exec': '#22c55e',
+    'Codex Review': '#f59e0b',
 };
 
-/**
- * Default color palette for sources not explicitly mapped.
- * Colors are assigned cyclically when a new unknown source is encountered.
- */
 export const defaultColors = ['#34d399', '#fb7185', '#a78bfa', '#f472b6', '#2dd4bf'];
 
-/**
- * Model family color mapping for model breakdown charts.
- */
 export const modelColorMap = {
     'Opus': '#fb7185',
     'Sonnet': '#60a5fa',
     'Haiku': '#34d399',
     'Unknown': '#a78bfa',
+    'GPT': '#10a37f',
+    'GPT-5': '#10a37f',
+    'Codex': '#22c55e',
+    'gpt-5.5': '#10a37f',
+    'gpt-5.4': '#22c55e',
+    'gpt-5.4-mini': '#84cc16',
+    'gpt-5.3-codex': '#0ea5e9',
+    'gpt-5.2': '#14b8a6',
 };
 
-/**
- * Abbreviated day names for heatmap column headers.
- * Order: Monday through Sunday (ISO week standard).
- */
+// Monday → Sunday (ISO week).
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/**
- * Full day names for heatmap tooltips.
- * Order: Monday through Sunday (ISO week standard).
- */
 export const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];

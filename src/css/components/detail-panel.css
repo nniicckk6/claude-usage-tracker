@@ -51,6 +51,7 @@
 .source-card.border-cline { border-left-color: var(--accent-rose); }
 .source-card.border-aider { border-left-color: #2dd4bf; }
 .source-card.border-continue { border-left-color: var(--accent-amber); }
+.source-card.border-codex { border-left-color: #10a37f; }
 
 .source-card-header {
     display: flex;
@@ -109,6 +110,7 @@
 .cost-bar-fill.fill-cline { background: linear-gradient(90deg, var(--accent-rose), #fda4af); }
 .cost-bar-fill.fill-aider { background: linear-gradient(90deg, #2dd4bf, #5eead4); }
 .cost-bar-fill.fill-continue { background: linear-gradient(90deg, var(--accent-amber), #fcd34d); }
+.cost-bar-fill.fill-codex { background: linear-gradient(90deg, #10a37f, #34d399); }
 
 /* Sub-table */
 .session-subtable { width: 100%; border-collapse: collapse; margin-top: 12px; }

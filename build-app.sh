@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build a standalone macOS .app for Claude Usage Tracker
+# Build a standalone macOS .app for AI Usage Tracker
 # Double-click to collect fresh data + view dashboard in a native window.
 
 set -e
@@ -9,7 +9,7 @@ SRC_DIR="$SCRIPT_DIR/src"
 PREMIUM_DIR="$SCRIPT_DIR/src-premium"
 ASSETS_DIR="$SCRIPT_DIR/assets"
 DIST_DIR="$SCRIPT_DIR/dist"
-APP_NAME="Claude Usage Tracker"
+APP_NAME="AI Usage Tracker"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 if [ -n "${APP_VERSION:-}" ]; then
     APP_VERSION="$APP_VERSION"
@@ -53,8 +53,8 @@ mkdir -p "$MACOS" "$RESOURCES"
 
 # ─── Compile native Swift app (universal binary) ──────────
 echo "⚙️  Compiling universal binary (arm64 + x86_64) ..."
-TMP_BIN_ARM="$(mktemp -t ClaudeUsageTracker.arm64.XXXX)"
-TMP_BIN_X86="$(mktemp -t ClaudeUsageTracker.x86_64.XXXX)"
+TMP_BIN_ARM="$(mktemp -t AIUsageTracker.arm64.XXXX)"
+TMP_BIN_X86="$(mktemp -t AIUsageTracker.x86_64.XXXX)"
 trap 'rm -f "$TMP_BIN_ARM" "$TMP_BIN_X86"' EXIT
 
 swiftc -O -parse-as-library "${SWIFT_DEFINES[@]}" -o "$TMP_BIN_ARM" \
@@ -65,8 +65,8 @@ swiftc -O -parse-as-library "${SWIFT_DEFINES[@]}" -o "$TMP_BIN_X86" \
     "$SRC_DIR/App.swift" "${PREMIUM_FILES[@]}" \
     -framework Cocoa -framework WebKit \
     -target x86_64-apple-macos12.0
-lipo -create -output "$MACOS/ClaudeUsageTracker" "$TMP_BIN_ARM" "$TMP_BIN_X86"
-echo "  ✅ Universal binary built: $(lipo -archs "$MACOS/ClaudeUsageTracker")"
+lipo -create -output "$MACOS/AIUsageTracker" "$TMP_BIN_ARM" "$TMP_BIN_X86"
+echo "  ✅ Universal binary built: $(lipo -archs "$MACOS/AIUsageTracker")"
 
 # Copy the core files into Resources
 cp "$SRC_DIR/collect-usage.js" "$RESOURCES/"
@@ -83,13 +83,13 @@ cat > "$CONTENTS/Info.plist" << PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>ClaudeUsageTracker</string>
+    <string>AIUsageTracker</string>
     <key>CFBundleName</key>
-    <string>Claude Usage Tracker</string>
+    <string>AI Usage Tracker</string>
     <key>CFBundleDisplayName</key>
-    <string>Claude Usage Tracker</string>
+    <string>AI Usage Tracker</string>
     <key>CFBundleIdentifier</key>
-    <string>com.claudeusagetracker</string>
+    <string>com.aiusagetracker</string>
     <key>CFBundleVersion</key>
     <string>$APP_VERSION</string>
     <key>CFBundleShortVersionString</key>
@@ -176,7 +176,7 @@ if [ -n "$SIGN_IDENTITY" ]; then
     echo "  ✅ Signed"
 
     if [ -n "$NOTARY_PROFILE" ]; then
-        ZIP_PATH="$DIST_DIR/ClaudeUsageTracker.zip"
+        ZIP_PATH="$DIST_DIR/AIUsageTracker.zip"
         echo ""
         echo "📤 Submitting for notarization (profile: $NOTARY_PROFILE) ..."
         ditto -c -k --keepParent "$APP_DIR" "$ZIP_PATH"
@@ -199,13 +199,13 @@ if [ -n "$SIGN_IDENTITY" ]; then
 fi
 
 # ─── DMG installer ────────────────────────────────────────
-# Produces dist/ClaudeUsageTracker-<version>.dmg with a /Applications
+# Produces dist/AIUsageTracker-<version>.dmg with a /Applications
 # shortcut so users get the standard "drag to install" window.
 # Set SKIP_DMG=1 to opt out.
 if [ "${SKIP_DMG:-}" != "1" ]; then
-    DMG_NAME="ClaudeUsageTracker-$APP_VERSION"
+    DMG_NAME="AIUsageTracker-$APP_VERSION"
     DMG_PATH="$DIST_DIR/$DMG_NAME.dmg"
-    DMG_VOLNAME="Claude Usage Tracker"
+    DMG_VOLNAME="AI Usage Tracker"
     rm -f "$DMG_PATH"
 
     echo ""
